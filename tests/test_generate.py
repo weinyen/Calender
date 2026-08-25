@@ -1,9 +1,12 @@
+import io
+import json
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
-from github_calendar.generate import EventError, fold, generate, issue_to_event, parse_fields, render_calendar
+from github_calendar.generate import EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar
 
 
 def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, labels=None):
@@ -88,6 +91,97 @@ class GenerateTests(unittest.TestCase):
     def test_parser_ignores_no_response(self):
         fields = parse_fields("### 場所\n\n_No response_\n\n### 説明\n\n内容")
         self.assertEqual(fields["場所"], "_No response_")
+
+    def test_empty_calendar_removes_stale_group_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            stale = output / "calendars/obsolete.ics"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("stale", encoding="utf-8")
+
+            generate([], "owner/repo", output)
+
+            self.assertFalse(stale.exists())
+            self.assertEqual(list((output / "calendars").glob("*.ics")), [])
+            calendar = (output / "calendar.ics").read_text(encoding="utf-8")
+            self.assertIn("BEGIN:VCALENDAR", calendar)
+            self.assertIn("END:VCALENDAR", calendar)
+            self.assertNotIn("BEGIN:VEVENT", calendar)
+
+    def test_render_escapes_special_characters_in_all_text_properties(self):
+        special = issue(
+            title="[予定] 設計,確認;会\\議",
+            labels=[
+                {"name": "calendar:event"},
+                {"name": "group:development"},
+                {"name": "type:review,urgent"},
+            ],
+        )
+        special["body"] = special["body"].replace(
+            "第1会議室", "A棟; 会議室, 1\\2"
+        )
+
+        calendar = render_calendar(
+            [issue_to_event(special, "owner/repo")], "owner/repo", "全体,開発"
+        )
+
+        self.assertIn(r"X-WR-CALNAME:全体\,開発", calendar)
+        self.assertIn(r"SUMMARY:設計\,確認\;会\\議", calendar)
+        self.assertIn(r"LOCATION:A棟\; 会議室\, 1\\2", calendar)
+        self.assertIn(r"CATEGORIES:development,review\,urgent", calendar)
+
+    def test_rendered_long_japanese_lines_are_folded_at_utf8_boundaries(self):
+        long_event = issue_to_event(
+            issue(title="[予定] " + "日本語の長い予定名" * 20), "owner/repo"
+        )
+
+        calendar = render_calendar([long_event], "owner/repo", "全体")
+        physical_lines = calendar.split("\r\n")
+
+        self.assertTrue(all(len(line.encode("utf-8")) <= 75 for line in physical_lines))
+        self.assertTrue(any(line.startswith(" ") for line in physical_lines))
+        calendar.encode("utf-8").decode("utf-8")
+
+    def test_generate_reports_issue_number_for_invalid_api_data(self):
+        invalid = issue(404)
+        invalid["body"] = ""
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(EventError, r"Issue #404: 開始・終了"):
+                generate([invalid], "owner/repo", Path(directory))
+
+    def test_fetch_issues_paginates_and_omits_pull_requests(self):
+        first_page = [
+            {"number": number, "title": f"Issue {number}"}
+            for number in range(1, 100)
+        ] + [{"number": 100, "pull_request": {"url": "https://example.com/pr/100"}}]
+        second_page = [{"number": 101, "title": "Issue 101"}]
+        responses = [_JsonResponse(first_page), _JsonResponse(second_page)]
+
+        with patch("urllib.request.urlopen", side_effect=responses) as urlopen:
+            issues = fetch_issues("owner/repo", "secret-token")
+
+        self.assertEqual(len(issues), 100)
+        self.assertEqual(issues[-1]["number"], 101)
+        self.assertEqual(urlopen.call_count, 2)
+        first_request, second_request = (call.args[0] for call in urlopen.call_args_list)
+        self.assertIn("page=1", first_request.full_url)
+        self.assertIn("page=2", second_request.full_url)
+        self.assertEqual(first_request.get_header("Authorization"), "Bearer secret-token")
+
+
+class _JsonResponse:
+    def __init__(self, value):
+        self._content = io.BytesIO(json.dumps(value).encode("utf-8"))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self, size=-1):
+        return self._content.read(size)
 
 
 if __name__ == "__main__":
