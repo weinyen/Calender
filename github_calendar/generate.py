@@ -125,6 +125,22 @@ class GenerationResult:
     calendars: tuple[CalendarResult, ...]
 
 
+@dataclass(frozen=True)
+class CalendarResult:
+    name: str
+    path: str
+    event_count: int
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    generated_at: datetime
+    published_events: int
+    excluded_events: int
+    private_events: int
+    calendars: tuple[CalendarResult, ...]
+
+
 def parse_fields(body: str) -> dict[str, str]:
     """Parse the stable Markdown headings emitted by GitHub Issue Forms."""
     matches = list(FIELD_RE.finditer(body or ""))
