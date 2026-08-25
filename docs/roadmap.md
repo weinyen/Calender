@@ -64,8 +64,8 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
    Closeした予定は次のICSから消えますが、`STATUS:CANCELLED` や `SEQUENCE` による明示的な取消・更新通知はありません。購読アプリごとの差を検証する必要があります。
 8. **公開URLの案内ページがない**
    PagesにはICSだけが配置され、利用可能なグループ、最終更新、購読方法、稼働状態を確認できるHTML indexはありません。
-9. **CIの品質ゲートはまだ限定的**
-   Pull Requestとmainへのpush、および公開前の単体テストは実行しますが、静的解析、型検査、依存関係・Actions更新の自動化はまだありません。
+9. **CIの品質ゲートが不足している**
+   公開workflow内で単体テストを実行せず、Pull Request用の独立したtest workflow、静的解析、型検査、依存関係・Actions更新の自動化もありません。
 
 ### 優先度: 低
 
@@ -82,7 +82,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 
 **目的:** 現在の挙動を壊さず変更できる状態にする。
 
-- [x] Pull Requestとmainへのpushで単体テストを実行するCIを追加する。
+- Pull Requestとmainへのpushで単体テストを実行するCIを追加する。
 - Issue Formの全項目からICSを生成するfixtureベースのend-to-endテストを追加する。
 - 空のカレンダー、複数ページ、複数グループ、古いグループ削除、特殊文字、長い日本語、不正APIデータを試験する。
 - RFC 5545 validatorをCIへ組み込むか、validatorが確認する不変条件を自動テスト化する。
@@ -99,7 +99,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 - `X-WR-CALNAME` を含む全プロパティのescapingとfoldingを網羅的に確認する。
 - DSTの曖昧・存在しないローカル時刻を検出し、Issue番号付きで修正方法を表示する。
 - Apple Calendar、Google Calendar、Outlookで、追加・編集・Close・Reopen・終日・タイムゾーンを受入試験する。
-- [x] workflowへテスト工程を追加し、テスト成功時だけPagesへデプロイする。
+- workflowへテスト工程を追加し、テスト成功時だけPagesへデプロイする。
 
 **完了条件:** 主要3クライアントで固定URLの購読と変更反映を確認し、一時障害や不正入力で壊れたICSを公開しない。
 
