@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: read
-  issues: read
+  issues: write
   pages: write
   id-token: write
 
@@ -22,16 +22,47 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ github.event_name != 'issues' || contains(github.event.issue.labels.*.name, 'calendar:event') || github.event.label.name == 'calendar:event' }}
     runs-on: ubuntu-latest
+    outputs:
+      validation-failed: ${{ steps.classify.outputs.validation-failed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Run unit tests
+        run: python -m unittest discover -v
       - name: Generate calendars
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -m github_calendar.generate --repository "${{ github.repository }}" --token "$GH_TOKEN" --output public
+        run: >-
+          python -m github_calendar.generate
+          --repository "${{ github.repository }}"
+          --token "$GH_TOKEN"
+          --output public
+          --summary "$GITHUB_STEP_SUMMARY"
+          --validation-report validation-report.json
+      - name: Update Issue validation feedback
+        if: ${{ always() && hashFiles('validation-report.json') != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m github_calendar.feedback
+          --repository "${{ github.repository }}"
+          --token "$GH_TOKEN"
+          --report validation-report.json
+      - name: Classify generation failure
+        id: classify
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -f validation-report.json ]] && python -c 'import json; raise SystemExit(not bool(json.load(open("validation-report.json", encoding="utf-8"))["errors"]))'; then
+            echo "validation-failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "validation-failed=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -46,4 +77,37 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
+  notify:
+    if: ${{ always() && (github.event_name != 'issues' || contains(github.event.issue.labels.*.name, 'calendar:event') || github.event.label.name == 'calendar:event') }}
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Update publish incident
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          VALIDATION_FAILED: ${{ needs.build.outputs.validation-failed }}
+        shell: bash
+        run: |
+          if [[ "$BUILD_RESULT" == "success" && "$DEPLOY_RESULT" == "success" ]]; then
+            status=resolved
+          elif [[ "$VALIDATION_FAILED" == "true" ]]; then
+            echo "Issue validation errors are reported on their source Issues."
+            exit 0
+          else
+            status=failure
+          fi
+          python -m github_calendar.notify \
+            --repository "${{ github.repository }}" \
+            --token "$GH_TOKEN" \
+            --status "$status" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --workflow "${{ github.workflow }}" \
+            --commit "${{ github.sha }}" \
+            --build-result "$BUILD_RESULT" \
+            --deploy-result "$DEPLOY_RESULT"
