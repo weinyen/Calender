@@ -56,6 +56,8 @@ PagesのルートURLには、公開予定件数、最終生成日時、全体・
 
 成功した **Publish calendar** workflowのSummaryには、公開・除外・非公開の予定件数、グループ別件数、各カレンダーとPages案内ページへのリンクが表示されます。
 
+入力エラー以外のbuild・deploy障害は、`[Calendar] Publish workflow failure`という専用Issueで通知します。同じIssueを更新し、正常な公開が確認できると自動的にCloseします。
+
 ## グルーピング
 
 `group:` に続けて英小文字、数字、ハイフンからなるラベルを付けます。

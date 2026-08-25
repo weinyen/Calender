@@ -46,6 +46,12 @@
 - 同じエラーではコメントを重複投稿せず、Issueを修正して検証に成功した場合は既存コメントを解消済みへ更新します。コメント操作は`issues` workflowのtrigger対象ではないため、再生成loopを発生させません。
 - フィードバックは公開成果物とは独立した補助機能です。GitHub APIの書き込みに失敗しても、正常なICSとPagesの公開は継続します。
 
+## workflow障害の通知
+
+- 入力エラー以外のbuild・deploy障害は、`[Calendar] Publish workflow failure`という専用Issueを作成または更新して、run URL、commit、jobの結果を通知します。
+- 同じ通知Issueを再利用し、次にbuildとdeployが両方成功すると復旧内容へ更新して自動Closeします。予定入力エラーは対象Issueへ直接返すため、運用Issueには重複通知しません。
+- 通知Issueには`calendar:event`を付けず、カレンダー公開workflowも同ラベルがないIssueイベントを無視するため、通知の作成・更新・Closeによるworkflow loopは発生しません。
+
 ## 対応している予定情報
 
 - 開始、終了、終日指定、タイムゾーン、件名、説明、場所、関連URL

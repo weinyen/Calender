@@ -109,7 +109,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 
 - [x] Pagesに、全体・グループ別の購読リンク、最終生成時刻、予定件数、使い方を示すindexページを生成する。
 - [x] `webcal://` リンクとHTTPS URLのコピー手段を用意する。
-- workflow失敗をGitHub Issue、メール、または利用チームの通知先へ知らせる仕組みを選択可能にする。
+- [x] workflow失敗を専用GitHub Issueで通知し、復旧時に自動Closeする。
 - [x] 入力エラーのIssueへ検証結果をコメントで返し、修正後は同じコメントを解消済みに更新する。
 - [x] 生成件数、除外件数、グループ一覧をjob summaryへ出す。
 - [x] フォームschemaにversionを持たせ、versionなしの既存Issueを含む後方互換方針を用意する。
