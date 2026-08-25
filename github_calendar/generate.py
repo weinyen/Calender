@@ -79,6 +79,30 @@ def _normalize_text(value: str) -> str:
     return value
 
 
+def _localize_datetime(value: str, zone: ZoneInfo, field_name: str) -> datetime:
+    """Parse a local time while rejecting DST gaps and ambiguous wall times."""
+    naive = datetime.strptime(value, "%Y-%m-%d %H:%M")
+    candidates = [naive.replace(tzinfo=zone, fold=fold) for fold in (0, 1)]
+    valid = [
+        candidate
+        for candidate in candidates
+        if candidate.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None)
+        == naive
+    ]
+    offsets = {candidate.utcoffset() for candidate in valid}
+    if not valid:
+        raise EventError(
+            f"{field_name}のローカル時刻 {value} は {zone.key} では存在しません。"
+            "DSTの切り替えを避けた別の時刻を指定してください"
+        )
+    if len(offsets) > 1:
+        raise EventError(
+            f"{field_name}のローカル時刻 {value} は {zone.key} では2回存在するため曖昧です。"
+            "DSTの切り替えを避けた別の時刻を指定してください"
+        )
+    return valid[0]
+
+
 def issue_to_event(issue: dict, repository: str) -> Event:
     fields = parse_fields(issue.get("body") or "")
     labels = tuple(
@@ -99,8 +123,10 @@ def issue_to_event(issue: dict, repository: str) -> Event:
             final_day = date.fromisoformat(end_text)
             end: date | datetime = final_day + timedelta(days=1)
         else:
-            start = datetime.strptime(start_text, "%Y-%m-%d %H:%M").replace(tzinfo=zone)
-            end = datetime.strptime(end_text, "%Y-%m-%d %H:%M").replace(tzinfo=zone)
+            start = _localize_datetime(start_text, zone, "開始")
+            end = _localize_datetime(end_text, zone, "終了")
+    except EventError:
+        raise
     except ValueError as exc:
         expected = "YYYY-MM-DD" if all_day else "YYYY-MM-DD HH:MM"
         raise EventError(f"開始・終了は {expected} 形式で入力してください") from exc

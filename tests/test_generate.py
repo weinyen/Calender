@@ -65,6 +65,95 @@ class GenerateTests(unittest.TestCase):
         with self.assertRaisesRegex(EventError, "終了は開始より後"):
             issue_to_event(issue(end="2026-09-01 09:00"), "owner/repo")
 
+    def test_nonexistent_dst_start_time_is_rejected_with_issue_number(self):
+        invalid = issue(
+            406,
+            start="2026-03-08 02:30",
+            end="2026-03-08 04:00",
+            timezone_name="America/New_York",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                EventError,
+                r"Issue #406: 開始.*2026-03-08 02:30.*America/New_York.*存在しません",
+            ):
+                generate([invalid], "owner/repo", Path(directory))
+
+    def test_ambiguous_dst_end_time_is_rejected_with_issue_number(self):
+        invalid = issue(
+            407,
+            start="2026-11-01 00:30",
+            end="2026-11-01 01:30",
+            timezone_name="America/New_York",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                EventError,
+                r"Issue #407: 終了.*2026-11-01 01:30.*America/New_York.*曖昧",
+            ):
+                generate([invalid], "owner/repo", Path(directory))
+
+    def test_dst_validation_is_applied_to_both_start_and_end(self):
+        cases = [
+            (
+                issue(
+                    408,
+                    start="2026-11-01 01:30",
+                    end="2026-11-01 02:30",
+                    timezone_name="America/New_York",
+                ),
+                r"Issue #408: 開始.*曖昧",
+            ),
+            (
+                issue(
+                    409,
+                    start="2026-03-08 01:30",
+                    end="2026-03-08 02:30",
+                    timezone_name="America/New_York",
+                ),
+                r"Issue #409: 終了.*存在しません",
+            ),
+        ]
+
+        for invalid, expected in cases:
+            with self.subTest(issue=invalid["number"]):
+                with tempfile.TemporaryDirectory() as directory:
+                    with self.assertRaisesRegex(EventError, expected):
+                        generate([invalid], "owner/repo", Path(directory))
+
+    def test_unambiguous_times_work_in_dst_and_non_dst_zones(self):
+        new_york = issue_to_event(
+            issue(
+                start="2026-03-08 03:30",
+                end="2026-03-08 04:30",
+                timezone_name="America/New_York",
+            ),
+            "owner/repo",
+        )
+        tokyo = issue_to_event(issue(timezone_name="Asia/Tokyo"), "owner/repo")
+        utc = issue_to_event(issue(timezone_name="UTC"), "owner/repo")
+
+        self.assertEqual(new_york.start.astimezone(timezone.utc).hour, 7)
+        self.assertEqual(tokyo.start.astimezone(timezone.utc).hour, 1)
+        self.assertEqual(utc.start.astimezone(timezone.utc).hour, 10)
+
+    def test_all_day_event_is_not_subject_to_dst_wall_time_validation(self):
+        event = issue_to_event(
+            issue(
+                start="2026-03-08",
+                end="2026-03-08",
+                timezone_name="America/New_York",
+                all_day=True,
+            ),
+            "owner/repo",
+        )
+
+        self.assertTrue(event.all_day)
+        self.assertEqual(event.start, date(2026, 3, 8))
+        self.assertEqual(event.end, date(2026, 3, 9))
+
     def test_invalid_url_is_rejected(self):
         invalid = issue()
         invalid["body"] = invalid["body"].replace("https://example.com", "javascript:alert(1)")

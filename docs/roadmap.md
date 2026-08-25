@@ -97,7 +97,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 - [x] GitHub API呼び出しへtimeout、限定retry、rate limitを含むエラー表示を追加する。
 - [x] 生成結果を一時ディレクトリへ作成し、検証成功後に成果物として採用するatomicな生成手順にする。
 - [x] `X-WR-CALNAME` を含む全プロパティのescapingとfoldingを網羅的に確認する。
-- DSTの曖昧・存在しないローカル時刻を検出し、Issue番号付きで修正方法を表示する。
+- [x] DSTの曖昧・存在しないローカル時刻を検出し、Issue番号付きで修正方法を表示する。
 - Apple Calendar、Google Calendar、Outlookで、追加・編集・Close・Reopen・終日・タイムゾーンを受入試験する。
 - [x] workflowへテスト工程を追加し、テスト成功時だけPagesへデプロイする。
 
