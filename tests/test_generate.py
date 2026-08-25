@@ -4,9 +4,10 @@ import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
-from github_calendar.generate import EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar
+from github_calendar.generate import ApiError, EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar
 
 
 def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, labels=None):
@@ -168,6 +169,92 @@ class GenerateTests(unittest.TestCase):
         self.assertIn("page=1", first_request.full_url)
         self.assertIn("page=2", second_request.full_url)
         self.assertEqual(first_request.get_header("Authorization"), "Bearer secret-token")
+        self.assertEqual(urlopen.call_args_list[0].kwargs["timeout"], 15.0)
+
+    def test_fetch_issues_retries_temporary_errors_with_exponential_backoff(self):
+        responses = [
+            _http_error(503, "Service Unavailable"),
+            _JsonResponse([]),
+        ]
+
+        with (
+            patch("urllib.request.urlopen", side_effect=responses) as urlopen,
+            patch("github_calendar.generate.time_module.sleep") as sleep,
+        ):
+            issues = fetch_issues("owner/repo", "token", backoff=2)
+
+        self.assertEqual(issues, [])
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_fetch_issues_honors_retry_after(self):
+        responses = [
+            _http_error(429, "Too Many Requests", {"Retry-After": "7"}),
+            _JsonResponse([]),
+        ]
+
+        with (
+            patch("urllib.request.urlopen", side_effect=responses),
+            patch("github_calendar.generate.time_module.sleep") as sleep,
+        ):
+            fetch_issues("owner/repo", "token")
+
+        sleep.assert_called_once_with(7.0)
+
+    def test_fetch_issues_does_not_retry_permanent_http_errors(self):
+        error = _http_error(401, "Unauthorized")
+
+        with (
+            patch("urllib.request.urlopen", side_effect=error) as urlopen,
+            patch("github_calendar.generate.time_module.sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(ApiError, r"owner/repo page 1: HTTP 401"):
+                fetch_issues("owner/repo", "secret-token")
+
+        urlopen.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_fetch_issues_reports_rate_limit_reset_without_token(self):
+        headers = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "0"}
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=_http_error(403, "Forbidden", headers),
+        ):
+            with self.assertRaises(ApiError) as raised:
+                fetch_issues("owner/repo", "secret-token")
+
+        message = str(raised.exception)
+        self.assertIn("rate limit exhausted", message)
+        self.assertIn("1970-01-01T00:00:00+00:00", message)
+        self.assertNotIn("secret-token", message)
+
+    def test_fetch_issues_stops_after_retry_limit_for_network_errors(self):
+        with (
+            patch(
+                "urllib.request.urlopen",
+                side_effect=URLError("temporary network failure"),
+            ) as urlopen,
+            patch("github_calendar.generate.time_module.sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(ApiError, r"owner/repo page 1"):
+                fetch_issues("owner/repo", "token", attempts=3, backoff=1)
+
+        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+
+    def test_fetch_issues_rejects_invalid_json_without_retry(self):
+        response = _RawResponse(b"not JSON")
+
+        with (
+            patch("urllib.request.urlopen", return_value=response) as urlopen,
+            patch("github_calendar.generate.time_module.sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(ApiError, r"invalid JSON.*page 1"):
+                fetch_issues("owner/repo", "token")
+
+        urlopen.assert_called_once()
+        sleep.assert_not_called()
 
 
 class _JsonResponse:
@@ -182,6 +269,21 @@ class _JsonResponse:
 
     def read(self, size=-1):
         return self._content.read(size)
+
+
+class _RawResponse(_JsonResponse):
+    def __init__(self, value):
+        self._content = io.BytesIO(value)
+
+
+def _http_error(code, reason, headers=None):
+    return HTTPError(
+        "https://api.github.com/repos/owner/repo/issues",
+        code,
+        reason,
+        headers or {},
+        None,
+    )
 
 
 if __name__ == "__main__":
