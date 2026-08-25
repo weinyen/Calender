@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
-from github_calendar.generate import ApiError, EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar, render_index, render_summary
+from github_calendar.generate import ApiError, EventError, detect_schema_version, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar, render_index, render_summary
 
 
 def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, labels=None):
@@ -45,6 +45,44 @@ https://example.com
 
 
 class GenerateTests(unittest.TestCase):
+    def test_schema_version_supports_legacy_label_and_body_marker(self):
+        self.assertEqual(detect_schema_version("", []), 1)
+        self.assertEqual(detect_schema_version("説明内のcalendar-schema:は通常の文字列", []), 1)
+        self.assertEqual(detect_schema_version("", ["calendar:schema-v1"]), 1)
+        self.assertEqual(
+            detect_schema_version("<!-- calendar-schema: 1 -->", []), 1
+        )
+        self.assertEqual(
+            detect_schema_version(
+                "<!-- calendar-schema: 1 -->", ["calendar:schema-v1"]
+            ),
+            1,
+        )
+
+    def test_schema_version_rejects_unsupported_malformed_and_conflicting_values(self):
+        cases = [
+            ("<!-- calendar-schema: 2 -->", [], "未対応.*2"),
+            ("<!-- calendar-schema: abc -->", [], "markerの形式が不正"),
+            ("<!-- calendar-schema: 1 --><!-- calendar-schema: 1 -->", [], "markerが重複"),
+            ("", ["calendar:schema-vx"], "ラベルの形式が不正"),
+            ("", ["calendar:schema-v1", "calendar:schema-v1"], "ラベルが重複"),
+            ("<!-- calendar-schema: 1 -->", ["calendar:schema-v2"], "指定が競合"),
+        ]
+
+        for body, labels, expected in cases:
+            with self.subTest(body=body, labels=labels):
+                with self.assertRaisesRegex(EventError, expected):
+                    detect_schema_version(body, labels)
+
+    def test_generate_reports_issue_number_for_unsupported_schema(self):
+        invalid = issue(410, labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v2"}])
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                EventError, r"Issue #410: 未対応のcalendar schema version.*2"
+            ):
+                generate([invalid], "owner/repository", Path(directory))
+
     def test_generation_result_counts_published_and_omitted_events(self):
         issues = [
             issue(1, labels=[{"name": "calendar:event"}, {"name": "group:beta"}]),

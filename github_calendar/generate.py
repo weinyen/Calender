@@ -24,11 +24,26 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 FIELD_RE = re.compile(r"^###\s+(.+?)\s*$", re.MULTILINE)
 GROUP_RE = re.compile(r"^group:([a-z0-9][a-z0-9-]*)$")
+SCHEMA_MARKER_RE = re.compile(r"<!--\s*calendar-schema:\s*(\d+)\s*-->")
+SCHEMA_MARKER_PREFIX_RE = re.compile(r"<!--\s*calendar-schema:")
+SCHEMA_LABEL_RE = re.compile(r"^calendar:schema-v(\d+)$")
 EMPTY_VALUES = {"", "_No response_", "なし", "None"}
 RETRYABLE_HTTP_STATUSES = {429, 502, 503, 504}
 DEFAULT_API_TIMEOUT = 15.0
 DEFAULT_API_ATTEMPTS = 3
 DEFAULT_API_BACKOFF = 1.0
+DEFAULT_SCHEMA_VERSION = 1
+SCHEMAS = {
+    1: {
+        "start": "開始",
+        "end": "終了",
+        "timezone": "タイムゾーン",
+        "all_day": "終日予定",
+        "location": "場所",
+        "url": "関連URL",
+        "description": "説明",
+    }
+}
 
 
 class EventError(ValueError):
@@ -86,6 +101,42 @@ def _value(fields: dict[str, str], name: str) -> str:
     return "" if value in EMPTY_VALUES else value
 
 
+def detect_schema_version(body: str, labels: Iterable[str]) -> int:
+    """Resolve an Issue Form schema version without breaking legacy issues."""
+    marker_values = SCHEMA_MARKER_RE.findall(body or "")
+    if SCHEMA_MARKER_PREFIX_RE.search(body or "") and not marker_values:
+        raise EventError("calendar schema markerの形式が不正です")
+    if len(marker_values) > 1:
+        raise EventError("calendar schema markerが重複しています")
+
+    schema_labels = [label for label in labels if label.startswith("calendar:schema-")]
+    label_values = []
+    for label in schema_labels:
+        match = SCHEMA_LABEL_RE.fullmatch(label)
+        if not match:
+            raise EventError(f"calendar schemaラベルの形式が不正です: {label}")
+        label_values.append(match.group(1))
+    if len(label_values) > 1:
+        raise EventError("calendar schemaラベルが重複しています")
+
+    declared = {int(value) for value in marker_values + label_values}
+    if len(declared) > 1:
+        raise EventError("calendar schemaの指定が競合しています")
+    version = declared.pop() if declared else DEFAULT_SCHEMA_VERSION
+    if version not in SCHEMAS:
+        supported = ", ".join(str(item) for item in sorted(SCHEMAS))
+        raise EventError(
+            f"未対応のcalendar schema versionです: {version} (対応version: {supported})"
+        )
+    return version
+
+
+def _schema_value(
+    fields: dict[str, str], schema_version: int, logical_name: str
+) -> str:
+    return _value(fields, SCHEMAS[schema_version][logical_name])
+
+
 def _normalize_text(value: str) -> str:
     value = value.replace("\r\n", "\n").replace("\r", "\n")
     if any(
@@ -121,19 +172,26 @@ def _localize_datetime(value: str, zone: ZoneInfo, field_name: str) -> datetime:
 
 
 def issue_to_event(issue: dict, repository: str) -> Event:
-    fields = parse_fields(issue.get("body") or "")
+    body = issue.get("body") or ""
+    fields = parse_fields(body)
     labels = tuple(
         label["name"] if isinstance(label, dict) else str(label)
         for label in issue.get("labels", [])
     )
-    all_day = "[x]" in _value(fields, "終日予定").lower()
-    timezone_name = _value(fields, "タイムゾーン") or "Asia/Tokyo"
+    schema_version = detect_schema_version(body, labels)
+    all_day = "[x]" in _schema_value(
+        fields, schema_version, "all_day"
+    ).lower()
+    timezone_name = (
+        _schema_value(fields, schema_version, "timezone") or "Asia/Tokyo"
+    )
     try:
         zone = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError as exc:
         raise EventError(f"未対応のタイムゾーンです: {timezone_name}") from exc
 
-    start_text, end_text = _value(fields, "開始"), _value(fields, "終了")
+    start_text = _schema_value(fields, schema_version, "start")
+    end_text = _schema_value(fields, schema_version, "end")
     try:
         if all_day:
             start: date | datetime = date.fromisoformat(start_text)
@@ -154,7 +212,7 @@ def issue_to_event(issue: dict, repository: str) -> Event:
     title = re.sub(r"^\[予定\]\s*", "", raw_title).strip()
     if not title:
         raise EventError("予定名が空です")
-    event_url = _value(fields, "関連URL")
+    event_url = _schema_value(fields, schema_version, "url")
     if event_url:
         parsed_url = urllib.parse.urlparse(event_url)
         if (
@@ -166,8 +224,8 @@ def issue_to_event(issue: dict, repository: str) -> Event:
     groups = tuple(sorted(match.group(1) for label in labels if (match := GROUP_RE.fullmatch(label))))
     types = sorted(label.split(":", 1)[1] for label in labels if label.startswith("type:") and len(label) > 5)
     categories = tuple(groups + tuple(types))
-    location = _value(fields, "場所")
-    description = _value(fields, "説明")
+    location = _schema_value(fields, schema_version, "location")
+    description = _schema_value(fields, schema_version, "description")
     for text_value in (title, location, description, *categories):
         _normalize_text(text_value)
     updated = issue.get("updated_at") or datetime.now(timezone.utc).isoformat()

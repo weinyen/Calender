@@ -5,6 +5,7 @@
     "body": "### 開始\n\n2026-09-01 10:00\n\n### 終了\n\n2026-09-01 11:00\n\n### タイムゾーン\n\nAsia/Tokyo\n\n### 終日予定\n\n- [ ] 終日予定として登録する\n\n### 場所\n\n第1会議室\n\n### 関連URL\n\nhttps://example.com/meetings/101\n\n### 説明\n\n進捗確認, 質疑\n次の行",
     "labels": [
       {"name": "calendar:event"},
+      {"name": "calendar:schema-v1"},
       {"name": "group:development"},
       {"name": "type:meeting"}
     ],

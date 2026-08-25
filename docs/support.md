@@ -48,6 +48,12 @@
 - Issue番号に基づく安定したUID
 - Issueの編集、Close、Reopen、公開制御ラベル変更後のICS再生成
 
+## Issue Form schema
+
+- 新しいIssue Formは`calendar:schema-v1`ラベルでschema version 1を宣言します。ラベルがない既存Issueもversion 1として読み取ります。
+- JSON fixtureなどでは`<!-- calendar-schema: 1 -->`を本文へ指定することもできます。ラベルと本文markerが競合する場合や、未対応・不正・重複したversionはIssue番号付きの入力エラーにします。
+- 将来version 2以降を導入する場合もversion 1の読み取りを維持し、実際の変更内容に対応する移行ツールと廃止時期を別途用意します。
+
 ## 未対応
 
 - 繰り返し予定（`RRULE`）

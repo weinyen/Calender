@@ -7,7 +7,7 @@ GitHub Issuesで予定を管理し、購読可能なiCalendar（ICS）をGitHub 
 ## 初期設定
 
 1. リポジトリの **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選択します。
-2. IssuesのLabelsで、制御ラベル `calendar:event`、`calendar:exclude`、`calendar:private` を作成します。`calendar:event` が存在しないとIssue Formから自動付与されません。
+2. IssuesのLabelsで、制御ラベル `calendar:event`、`calendar:schema-v1`、`calendar:exclude`、`calendar:private` を作成します。ラベルが存在しないとIssue Formから自動付与されません。
 3. 必要なグループラベル（例: `group:development`）と種別ラベル（例: `type:meeting`）を作成します。
 4. Actionsの **Publish calendar** を手動実行します。
 
@@ -31,6 +31,8 @@ PagesのルートURLには、公開予定件数、最終生成日時、全体・
 3. 必要に応じて `group:<名前>` と `type:<名前>` ラベルを付けます。
 
 `calendar:event` ラベルが付いたOpen Issueだけが生成対象です。Issueタイトル先頭の `[予定]` はICSの予定名から自動的に除かれます。
+
+新しいIssueには`calendar:schema-v1`が付き、フォームの解釈方法を固定します。ラベル追加前に作成された予定は、後方互換のためschema version 1として扱います。
 
 ### 日時の入力
 
