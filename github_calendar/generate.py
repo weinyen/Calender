@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import email.utils
 import json
+import os
 import re
+import shutil
 import sys
+import tempfile
 import time as time_module
 import urllib.parse
 import urllib.request
@@ -277,6 +280,38 @@ def fetch_issues(
         page += 1
 
 
+def _validate_calendar(content: str, filename: str) -> None:
+    """Reject malformed rendered output before it can replace published files."""
+    if not content.endswith("\r\n") or "\n" in content.replace("\r\n", ""):
+        raise EventError(f"{filename}: ICSの改行はCRLFである必要があります")
+    lines = content.removesuffix("\r\n").split("\r\n")
+    if not lines or lines[0] != "BEGIN:VCALENDAR" or lines[-1] != "END:VCALENDAR":
+        raise EventError(f"{filename}: VCALENDARの開始・終了が不正です")
+    if any(len(line.encode("utf-8")) > 75 for line in lines):
+        raise EventError(f"{filename}: ICSの行が75 octetを超えています")
+    if lines.count("BEGIN:VEVENT") != lines.count("END:VEVENT"):
+        raise EventError(f"{filename}: VEVENTの開始・終了が対応していません")
+
+
+def _replace_output(staged: Path, output: Path, temporary_root: Path) -> None:
+    """Replace an output tree, restoring the previous tree if commit fails."""
+    previous = temporary_root / "previous"
+    had_previous = output.exists() or output.is_symlink()
+    if had_previous:
+        os.replace(output, previous)
+    try:
+        os.replace(staged, output)
+    except BaseException:
+        if had_previous:
+            os.replace(previous, output)
+        raise
+    if had_previous:
+        if previous.is_dir() and not previous.is_symlink():
+            shutil.rmtree(previous)
+        else:
+            previous.unlink()
+
+
 def generate(issues: Iterable[dict], repository: str, output: Path) -> None:
     events, errors = [], []
     for issue in issues:
@@ -289,15 +324,32 @@ def generate(issues: Iterable[dict], repository: str, output: Path) -> None:
             errors.append(f"Issue #{issue.get('number')}: {exc}")
     if errors:
         raise EventError("\n".join(errors))
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "calendar.ics").write_text(render_calendar(events, repository, "全体カレンダー"), encoding="utf-8", newline="")
-    group_dir = output / "calendars"
-    group_dir.mkdir(exist_ok=True)
-    for old_file in group_dir.glob("*.ics"):
-        old_file.unlink()
+
+    artifacts = {
+        Path("calendar.ics"): render_calendar(
+            events, repository, "全体カレンダー"
+        )
+    }
     for group in sorted({group for event in events for group in event.groups}):
         selected = [event for event in events if group in event.groups]
-        (group_dir / f"{group}.ics").write_text(render_calendar(selected, repository, group), encoding="utf-8", newline="")
+        artifacts[Path("calendars") / f"{group}.ics"] = render_calendar(
+            selected, repository, group
+        )
+    for relative_path, content in artifacts.items():
+        _validate_calendar(content, relative_path.as_posix())
+
+    output = output.absolute()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    prefix = f".{output.name}.tmp-"
+    with tempfile.TemporaryDirectory(prefix=prefix, dir=output.parent) as directory:
+        temporary_root = Path(directory)
+        staged = temporary_root / "next"
+        staged.mkdir()
+        for relative_path, content in artifacts.items():
+            destination = staged / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(content, encoding="utf-8", newline="")
+        _replace_output(staged, output, temporary_root)
 
 
 def main() -> int:

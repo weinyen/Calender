@@ -151,6 +151,65 @@ class GenerateTests(unittest.TestCase):
             with self.assertRaisesRegex(EventError, r"Issue #404: 開始・終了"):
                 generate([invalid], "owner/repo", Path(directory))
 
+    def test_generate_replaces_the_complete_output_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "public"
+            stale = output / "calendars" / "obsolete.ics"
+            unrelated = output / "partial.txt"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("old calendar", encoding="utf-8")
+            unrelated.write_text("old partial output", encoding="utf-8")
+
+            generate(
+                [issue(labels=[{"name": "calendar:event"}, {"name": "group:new"}])],
+                "owner/repo",
+                output,
+            )
+
+            self.assertTrue((output / "calendar.ics").exists())
+            self.assertTrue((output / "calendars/new.ics").exists())
+            self.assertFalse(stale.exists())
+            self.assertFalse(unrelated.exists())
+            self.assertEqual(list(Path(directory).glob(".public.tmp-*")), [])
+
+    def test_generate_keeps_previous_output_when_staging_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "public"
+            previous = output / "calendar.ics"
+            output.mkdir()
+            previous.write_text("last known good", encoding="utf-8")
+
+            with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    generate([], "owner/repo", output)
+
+            self.assertEqual(previous.read_text(encoding="utf-8"), "last known good")
+            self.assertEqual(list(Path(directory).glob(".public.tmp-*")), [])
+
+    def test_generate_restores_previous_output_when_commit_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "public"
+            previous = output / "calendar.ics"
+            output.mkdir()
+            previous.write_text("last known good", encoding="utf-8")
+
+            real_replace = __import__("os").replace
+            calls = 0
+
+            def fail_new_output(source, destination):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("rename failed")
+                return real_replace(source, destination)
+
+            with patch("github_calendar.generate.os.replace", side_effect=fail_new_output):
+                with self.assertRaisesRegex(OSError, "rename failed"):
+                    generate([], "owner/repo", output)
+
+            self.assertEqual(previous.read_text(encoding="utf-8"), "last known good")
+            self.assertEqual(list(Path(directory).glob(".public.tmp-*")), [])
+
     def test_fetch_issues_paginates_and_omits_pull_requests(self):
         first_page = [
             {"number": number, "title": f"Issue {number}"}
