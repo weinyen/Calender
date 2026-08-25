@@ -2,6 +2,8 @@
 
 GitHub Issuesで予定を管理し、購読可能なiCalendar（ICS）をGitHub Pagesへ自動公開します。
 
+現在の実装範囲、未対応事項、今後の優先順位は[現状整理とロードマップ](docs/roadmap.md)を、対応環境と互換性の保証範囲は[サポート範囲](docs/support.md)を参照してください。主要カレンダーアプリの確認手順と結果は[受入試験](docs/acceptance-testing.md)に記録します。
+
 ## 初期設定
 
 1. リポジトリの **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選択します。
@@ -15,6 +17,10 @@ GitHub Issuesで予定を管理し、購読可能なiCalendar（ICS）をGitHub 
 https://<owner>.github.io/<repository>/calendar.ics
 https://<owner>.github.io/<repository>/calendars/development.ics
 ```
+
+PagesのルートURLには、公開予定件数、最終生成日時、全体・グループ別の購読リンクと登録方法を示す案内ページが生成されます。案内ページに予定の件名や詳細は表示しません。
+
+案内ページの「webcalで購読」は、`webcal://`に対応するカレンダーアプリを直接開きます。Google Calendarなどへ手動登録する場合は、「URLをコピー」でHTTPS URLをコピーしてください。
 
 カレンダーアプリではファイルを一度だけインポートせず、URLを指定して**購読**してください。購読先が変更を取得する間隔は各アプリに依存します。
 
@@ -44,6 +50,8 @@ https://<owner>.github.io/<repository>/calendars/development.ics
 
 入力が不正な予定がある場合、Actionsは失敗して直前の正常なPagesを維持します。ActionsログにIssue番号と修正理由が表示されます。
 
+成功した **Publish calendar** workflowのSummaryには、公開・除外・非公開の予定件数、グループ別件数、各カレンダーとPages案内ページへのリンクが表示されます。
+
 ## グルーピング
 
 `group:` に続けて英小文字、数字、ハイフンからなるラベルを付けます。
@@ -58,7 +66,7 @@ group:company
 
 ## ローカル実行
 
-Python 3.11以降を使用します。実行時依存パッケージはありません。
+サポート対象のPython 3.11または3.12を使用します。実行時依存パッケージはありません。
 
 ```bash
 python -m github_calendar.generate \

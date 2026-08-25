@@ -28,10 +28,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Run unit tests
+        run: python -m unittest discover -v
       - name: Generate calendars
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -m github_calendar.generate --repository "${{ github.repository }}" --token "$GH_TOKEN" --output public
+        run: >-
+          python -m github_calendar.generate
+          --repository "${{ github.repository }}"
+          --token "$GH_TOKEN"
+          --output public
+          --summary "$GITHUB_STEP_SUMMARY"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -46,4 +53,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
