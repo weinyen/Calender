@@ -69,6 +69,16 @@ def _value(fields: dict[str, str], name: str) -> str:
     return "" if value in EMPTY_VALUES else value
 
 
+def _normalize_text(value: str) -> str:
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    if any(
+        (ord(char) < 0x20 and char not in {"\n", "\t"}) or ord(char) == 0x7f
+        for char in value
+    ):
+        raise EventError("ICSのテキストに制御文字は使用できません")
+    return value
+
+
 def issue_to_event(issue: dict, repository: str) -> Event:
     fields = parse_fields(issue.get("body") or "")
     labels = tuple(
@@ -104,23 +114,38 @@ def issue_to_event(issue: dict, repository: str) -> Event:
     event_url = _value(fields, "関連URL")
     if event_url:
         parsed_url = urllib.parse.urlparse(event_url)
-        if "\n" in event_url or "\r" in event_url or parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        if (
+            any(ord(char) < 0x20 or ord(char) == 0x7f for char in event_url)
+            or parsed_url.scheme not in {"http", "https"}
+            or not parsed_url.netloc
+        ):
             raise EventError("関連URLは有効な http または https URLにしてください")
     groups = tuple(sorted(match.group(1) for label in labels if (match := GROUP_RE.fullmatch(label))))
     types = sorted(label.split(":", 1)[1] for label in labels if label.startswith("type:") and len(label) > 5)
     categories = tuple(groups + tuple(types))
+    location = _value(fields, "場所")
+    description = _value(fields, "説明")
+    for text_value in (title, location, description, *categories):
+        _normalize_text(text_value)
     updated = issue.get("updated_at") or datetime.now(timezone.utc).isoformat()
     return Event(
         issue_number=int(issue["number"]), title=title, start=start, end=end,
         all_day=all_day, timezone_name=timezone_name,
-        location=_value(fields, "場所"), description=_value(fields, "説明"),
+        location=location, description=description,
         url=event_url, groups=groups, categories=categories,
         updated_at=datetime.fromisoformat(updated.replace("Z", "+00:00")),
     )
 
 
 def escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
+    """Normalize and escape an RFC 5545 TEXT value."""
+    value = _normalize_text(value)
+    return (
+        value.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+    )
 
 
 def fold(line: str, limit: int = 75) -> str:

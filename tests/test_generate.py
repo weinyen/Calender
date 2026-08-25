@@ -131,6 +131,61 @@ class GenerateTests(unittest.TestCase):
         self.assertIn(r"LOCATION:A棟\; 会議室\, 1\\2", calendar)
         self.assertIn(r"CATEGORIES:development,review\,urgent", calendar)
 
+    def test_render_normalizes_text_newlines_but_preserves_uri_characters(self):
+        special = issue(labels=[{"name": "calendar:event"}])
+        special["body"] = special["body"].replace(
+            "進捗確認, 質疑\n次の行",
+            "Windows\r\nMac\rUnix\n改行",
+        ).replace(
+            "https://example.com",
+            "https://example.com/path?q=one,two;three",
+        )
+
+        calendar = render_calendar(
+            [issue_to_event(special, "owner/repo")], "owner/repo", "全体"
+        )
+
+        self.assertIn(r"DESCRIPTION:Windows\nMac\nUnix\n改行", calendar)
+        self.assertIn("URL:https://example.com/path?q=one,two;three", calendar)
+        self.assertNotIn("URL:https://example.com/path?q=one\\,two\\;three", calendar)
+
+    def test_generate_rejects_control_characters_with_issue_number(self):
+        invalid = issue(405, title="[予定] 不正\x00件名")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(EventError, r"Issue #405:.*制御文字"):
+                generate([invalid], "owner/repo", Path(directory))
+
+    def test_all_rendered_properties_are_folded_to_75_octets(self):
+        long_value = "長い値" * 40
+        special = issue(
+            title="[予定] " + long_value,
+            labels=[
+                {"name": "calendar:event"},
+                {"name": "type:" + long_value},
+            ],
+        )
+        special["body"] = special["body"].replace("第1会議室", long_value)
+        special["body"] = special["body"].replace(
+            "進捗確認, 質疑\n次の行", long_value
+        )
+        special["body"] = special["body"].replace(
+            "https://example.com", "https://example.com/" + "path/" * 30
+        )
+
+        calendar = render_calendar(
+            [issue_to_event(special, "owner/repo")],
+            "owner/repo",
+            long_value,
+        )
+
+        self.assertTrue(
+            all(
+                len(line.encode("utf-8")) <= 75
+                for line in calendar.split("\r\n")
+            )
+        )
+
     def test_rendered_long_japanese_lines_are_folded_at_utf8_boundaries(self):
         long_event = issue_to_event(
             issue(title="[予定] " + "日本語の長い予定名" * 20), "owner/repo"
