@@ -264,7 +264,7 @@ def render_index(
           </div>
           <code class="calendar-url">{escaped_https}</code>
           <div class="actions">
-            <a class="button primary subscribe-link" href="{html.escape(webcal_url, quote=True)}">カレンダーで購読</a>
+            <a class="button primary subscribe-link" href="{html.escape(webcal_url, quote=True)}" aria-label="{html.escape(title)}をwebcalで購読">webcalで購読</a>
             <button class="button copy-button" type="button">URLをコピー</button>
             <a class="text-link download-link" href="{escaped_https}">ICSを開く</a>
           </div>
@@ -357,7 +357,7 @@ def render_index(
       <p class="section-copy">アプリによって更新の反映まで時間がかかる場合があります。</p>
       <div class="guide">
         <article><h3>Google Calendar</h3><p>「URLから追加」にHTTPS URLを設定します。</p></article>
-        <article><h3>Apple Calendar</h3><p>「カレンダー照会」でURLを設定するか、「カレンダーで購読」を選びます。</p></article>
+        <article><h3>Apple Calendar</h3><p>「カレンダー照会」でHTTPS URLを設定するか、「webcalで購読」を選びます。</p></article>
         <article><h3>Outlook</h3><p>インターネットカレンダーとしてHTTPS URLを追加します。</p></article>
       </div>
     </section>

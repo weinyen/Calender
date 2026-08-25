@@ -80,6 +80,9 @@ class GenerateTests(unittest.TestCase):
         self.assertIn("2026-08-25 12:34 UTC", index)
         self.assertIn("https://owner.github.io/repository/calendar.ics", index)
         self.assertIn("webcal://owner.github.io/repository/calendar.ics", index)
+        self.assertEqual(index.count('href="webcal://'), 3)
+        self.assertEqual(index.count(">webcalで購読</a>"), 3)
+        self.assertIn("全体カレンダーをwebcalで購読", index)
         self.assertIn("calendars/company.ics", index)
         self.assertIn("1件の予定", index)
         self.assertIn("calendars/development.ics", index)
@@ -105,6 +108,7 @@ class GenerateTests(unittest.TestCase):
         )
 
         self.assertIn("https://owner.github.io/calendar.ics", index)
+        self.assertIn("webcal://owner.github.io/calendar.ics", index)
         self.assertNotIn("owner.github.io/owner.github.io", index)
 
     def test_parse_and_render_timed_event(self):

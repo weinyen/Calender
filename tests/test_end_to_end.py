@@ -53,6 +53,8 @@ class GenerateEndToEndTests(unittest.TestCase):
             self.assertIn("GitHub Calendar", index)
             self.assertIn("2件</strong><span>公開予定", index)
             self.assertIn("https://owner.github.io/repository/calendar.ics", index)
+            self.assertIn("webcal://owner.github.io/repository/calendar.ics", index)
+            self.assertIn("webcalで購読", index)
             self.assertIn("calendars/company.ics", index)
             self.assertIn("calendars/development.ics", index)
             self.assertNotIn("Planning meeting", index)
