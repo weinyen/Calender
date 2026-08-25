@@ -3,25 +3,36 @@
 from __future__ import annotations
 
 import argparse
+import email.utils
 import json
 import re
 import sys
+import time as time_module
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
+from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 FIELD_RE = re.compile(r"^###\s+(.+?)\s*$", re.MULTILINE)
 GROUP_RE = re.compile(r"^group:([a-z0-9][a-z0-9-]*)$")
 EMPTY_VALUES = {"", "_No response_", "なし", "None"}
+RETRYABLE_HTTP_STATUSES = {429, 502, 503, 504}
+DEFAULT_API_TIMEOUT = 15.0
+DEFAULT_API_ATTEMPTS = 3
+DEFAULT_API_BACKOFF = 1.0
 
 
 class EventError(ValueError):
     """An issue could not be converted to an event."""
+
+
+class ApiError(RuntimeError):
+    """GitHub Issues could not be fetched safely."""
 
 
 @dataclass(frozen=True)
@@ -163,7 +174,91 @@ def render_calendar(events: Iterable[Event], repository: str, name: str) -> str:
     return "\r\n".join(fold(line) for line in lines) + "\r\n"
 
 
-def fetch_issues(repository: str, token: str) -> list[dict]:
+def _retry_after(headers, default: float) -> float:
+    value = headers.get("Retry-After") if headers else None
+    if not value:
+        return default
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            retry_at = email.utils.parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return default
+
+
+def _rate_limit_detail(headers) -> str:
+    if not headers or headers.get("X-RateLimit-Remaining") != "0":
+        return ""
+    reset = headers.get("X-RateLimit-Reset")
+    if not reset:
+        return " (GitHub API rate limit exhausted)"
+    try:
+        reset_at = datetime.fromtimestamp(int(reset), timezone.utc).isoformat()
+    except (ValueError, OverflowError, OSError):
+        return " (GitHub API rate limit exhausted)"
+    return f" (GitHub API rate limit exhausted; resets at {reset_at})"
+
+
+def _fetch_page(
+    request: urllib.request.Request,
+    repository: str,
+    page: int,
+    *,
+    timeout: float,
+    attempts: int,
+    backoff: float,
+) -> list[dict]:
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                batch = json.load(response)
+            if not isinstance(batch, list):
+                raise ApiError(
+                    f"GitHub API returned an invalid response for {repository} page {page}: expected a list"
+                )
+            return batch
+        except HTTPError as exc:
+            detail = _rate_limit_detail(exc.headers)
+            message = (
+                f"GitHub API request failed for {repository} page {page}: "
+                f"HTTP {exc.code} {exc.reason}{detail}"
+            )
+            if exc.code not in RETRYABLE_HTTP_STATUSES or attempt == attempts:
+                raise ApiError(message) from exc
+            delay = _retry_after(exc.headers, backoff * (2 ** (attempt - 1)))
+        except (TimeoutError, URLError) as exc:
+            message = (
+                f"GitHub API request failed for {repository} page {page}: {exc}"
+            )
+            if attempt == attempts:
+                raise ApiError(message) from exc
+            delay = backoff * (2 ** (attempt - 1))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ApiError(
+                f"GitHub API returned invalid JSON for {repository} page {page}"
+            ) from exc
+        time_module.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def fetch_issues(
+    repository: str,
+    token: str,
+    *,
+    timeout: float = DEFAULT_API_TIMEOUT,
+    attempts: int = DEFAULT_API_ATTEMPTS,
+    backoff: float = DEFAULT_API_BACKOFF,
+) -> list[dict]:
+    if timeout <= 0:
+        raise ValueError("timeout must be greater than zero")
+    if attempts < 1:
+        raise ValueError("attempts must be at least one")
+    if backoff < 0:
+        raise ValueError("backoff must not be negative")
     issues: list[dict] = []
     page = 1
     while True:
@@ -172,8 +267,10 @@ def fetch_issues(repository: str, token: str) -> list[dict]:
             f"https://api.github.com/repos/{repository}/issues?{query}",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
         )
-        with urllib.request.urlopen(request) as response:
-            batch = json.load(response)
+        batch = _fetch_page(
+            request, repository, page,
+            timeout=timeout, attempts=attempts, backoff=backoff,
+        )
         issues.extend(issue for issue in batch if "pull_request" not in issue)
         if len(batch) < 100:
             return issues
@@ -210,15 +307,15 @@ def main() -> int:
     parser.add_argument("--input", type=Path, help="JSON issue fixture instead of GitHub API")
     parser.add_argument("--output", type=Path, default=Path("public"))
     args = parser.parse_args()
-    if args.input:
-        issues = json.loads(args.input.read_text(encoding="utf-8"))
-    elif args.token:
-        issues = fetch_issues(args.repository, args.token)
-    else:
-        parser.error("--token or --input is required")
     try:
+        if args.input:
+            issues = json.loads(args.input.read_text(encoding="utf-8"))
+        elif args.token:
+            issues = fetch_issues(args.repository, args.token)
+        else:
+            parser.error("--token or --input is required")
         generate(issues, args.repository, args.output)
-    except EventError as exc:
+    except (ApiError, EventError, json.JSONDecodeError) as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
