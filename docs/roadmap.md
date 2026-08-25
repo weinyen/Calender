@@ -98,7 +98,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 - [x] 生成結果を一時ディレクトリへ作成し、検証成功後に成果物として採用するatomicな生成手順にする。
 - [x] `X-WR-CALNAME` を含む全プロパティのescapingとfoldingを網羅的に確認する。
 - [x] DSTの曖昧・存在しないローカル時刻を検出し、Issue番号付きで修正方法を表示する。
-- Apple Calendar、Google Calendar、Outlookで、追加・編集・Close・Reopen・終日・タイムゾーンを受入試験する。
+- Apple Calendar、Google Calendar、Outlookで、追加・編集・Close・Reopen・終日・タイムゾーンを[受入試験](acceptance-testing.md)する。
 - [x] workflowへテスト工程を追加し、テスト成功時だけPagesへデプロイする。
 
 **完了条件:** 主要3クライアントで固定URLの購読と変更反映を確認し、一時障害や不正入力で壊れたICSを公開しない。

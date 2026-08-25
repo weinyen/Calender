@@ -11,7 +11,7 @@
 - iCalendarはRFC 5545の基本的な`VCALENDAR`と`VEVENT`を生成します。
 - 時刻あり予定は入力されたタイムゾーンからUTCへ変換し、`Z`付きの日時として出力します。`VTIMEZONE`と元のタイムゾーン名は出力しません。
 - 終日予定は`VALUE=DATE`で出力し、`DTEND`はiCalendar仕様に従った排他的な終了日です。
-- Apple Calendar、Google Calendar、Outlookでの継続購読は受入試験前です。現段階では、これらのアプリ固有の挙動や更新間隔を保証しません。
+- Apple Calendar、Google Calendar、Outlookでの継続購読は[受入試験](acceptance-testing.md)前です。現段階では、これらのアプリ固有の挙動や更新間隔を保証しません。
 - カレンダーアプリによる購読先の再取得間隔は各アプリに依存し、このリポジトリから制御できません。
 - 件名、説明、場所、カテゴリ、カレンダー名はRFC 5545のTEXT値としてescapeし、CRLFとCRを改行へ正規化します。URLはURIとして扱い、TEXT用のescapeは適用しません。
 - すべてのcontent lineをUTF-8の文字境界で75 octet以内にfoldします。改行とタブ以外の制御文字は、不正なICSを生成しないよう入力エラーとして拒否します。

@@ -2,7 +2,7 @@
 
 GitHub Issuesで予定を管理し、購読可能なiCalendar（ICS）をGitHub Pagesへ自動公開します。
 
-現在の実装範囲、未対応事項、今後の優先順位は[現状整理とロードマップ](docs/roadmap.md)を、対応環境と互換性の保証範囲は[サポート範囲](docs/support.md)を参照してください。
+現在の実装範囲、未対応事項、今後の優先順位は[現状整理とロードマップ](docs/roadmap.md)を、対応環境と互換性の保証範囲は[サポート範囲](docs/support.md)を参照してください。主要カレンダーアプリの確認手順と結果は[受入試験](docs/acceptance-testing.md)に記録します。
 
 ## 初期設定
 
