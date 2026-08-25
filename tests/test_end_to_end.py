@@ -31,6 +31,7 @@ class GenerateEndToEndTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((output / "index.html").exists())
             actual_files = {
                 path.relative_to(output) for path in output.rglob("*.ics")
             }
@@ -47,6 +48,14 @@ class GenerateEndToEndTests(unittest.TestCase):
                         actual.decode("utf-8").replace("\r\n", "\n"),
                         (EXPECTED / relative_path).read_text(encoding="utf-8"),
                     )
+
+            index = (output / "index.html").read_text(encoding="utf-8")
+            self.assertIn("GitHub Calendar", index)
+            self.assertIn("2件</strong><span>公開予定", index)
+            self.assertIn("https://owner.github.io/repository/calendar.ics", index)
+            self.assertIn("calendars/company.ics", index)
+            self.assertIn("calendars/development.ics", index)
+            self.assertNotIn("Planning meeting", index)
 
 
 if __name__ == "__main__":

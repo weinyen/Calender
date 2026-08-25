@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import email.utils
+import html
 import json
 import os
 import re
@@ -228,6 +229,168 @@ def render_calendar(events: Iterable[Event], repository: str, name: str) -> str:
     return "\r\n".join(fold(line) for line in lines) + "\r\n"
 
 
+def _pages_base_url(repository: str) -> str:
+    owner, separator, name = repository.partition("/")
+    if not separator or not owner or not name:
+        raise ValueError("repository must use owner/repository format")
+    owner_path = urllib.parse.quote(owner, safe="")
+    repository_path = urllib.parse.quote(name, safe="")
+    if name.casefold() == f"{owner}.github.io".casefold():
+        return f"https://{owner_path}.github.io"
+    return f"https://{owner_path}.github.io/{repository_path}"
+
+
+def render_index(
+    events: Iterable[Event],
+    repository: str,
+    generated_at: datetime,
+) -> str:
+    """Render a dependency-free subscription and publication status page."""
+    event_list = list(events)
+    groups = sorted({group for event in event_list for group in event.groups})
+    base_url = _pages_base_url(repository)
+    generated_at = generated_at.astimezone(timezone.utc)
+
+    def calendar_card(title: str, path: str, count: int) -> str:
+        https_url = f"{base_url}/{urllib.parse.quote(path, safe='/')}"
+        webcal_url = "webcal://" + https_url.removeprefix("https://")
+        escaped_path = html.escape(path, quote=True)
+        escaped_https = html.escape(https_url, quote=True)
+        return f"""
+        <article class="calendar-card" data-calendar-path="{escaped_path}">
+          <div>
+            <p class="eyebrow">{count}件の予定</p>
+            <h3>{html.escape(title)}</h3>
+          </div>
+          <code class="calendar-url">{escaped_https}</code>
+          <div class="actions">
+            <a class="button primary subscribe-link" href="{html.escape(webcal_url, quote=True)}">カレンダーで購読</a>
+            <button class="button copy-button" type="button">URLをコピー</button>
+            <a class="text-link download-link" href="{escaped_https}">ICSを開く</a>
+          </div>
+        </article>"""
+
+    cards = [calendar_card("全体カレンダー", "calendar.ics", len(event_list))]
+    cards.extend(
+        calendar_card(
+            group,
+            f"calendars/{group}.ics",
+            sum(group in event.groups for event in event_list),
+        )
+        for group in groups
+    )
+    group_summary = (
+        f"{len(groups)}個のグループ別カレンダーを公開しています。"
+        if groups
+        else "現在、グループ別カレンダーはありません。"
+    )
+    timestamp = generated_at.isoformat().replace("+00:00", "Z")
+    display_timestamp = generated_at.strftime("%Y-%m-%d %H:%M UTC")
+    return f"""<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="GitHub Issuesから生成した公開カレンダーの購読案内">
+  <title>GitHub Calendar</title>
+  <style>
+    :root {{ color-scheme: light; --ink: #172235; --muted: #5d6878; --line: #dce2ea; --surface: #fff; --accent: #3157d5; --accent-dark: #2442a5; --tint: #eef3ff; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; color: var(--ink); background: #f5f7fb; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; }}
+    .shell {{ width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 72px; }}
+    .hero {{ padding: 40px; color: #fff; background: linear-gradient(135deg, #172a61, #3157d5 62%, #6486ef); border-radius: 24px; box-shadow: 0 18px 50px rgb(35 58 125 / 18%); }}
+    .status {{ display: inline-flex; align-items: center; gap: 8px; margin: 0 0 16px; padding: 5px 11px; color: #143a29; background: #c9f7df; border-radius: 999px; font-size: .875rem; font-weight: 700; }}
+    .status::before {{ width: 8px; height: 8px; content: ""; background: #168553; border-radius: 50%; }}
+    h1 {{ margin: 0; font-size: clamp(2rem, 7vw, 4rem); line-height: 1.08; letter-spacing: -.04em; }}
+    .lead {{ max-width: 650px; margin: 18px 0 0; color: #e5ebff; font-size: 1.05rem; }}
+    .metrics {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 22px 0 0; }}
+    .metric {{ padding: 14px 16px; background: rgb(255 255 255 / 12%); border: 1px solid rgb(255 255 255 / 20%); border-radius: 14px; }}
+    .metric strong, .metric span {{ display: block; }}
+    .metric strong {{ font-size: 1.2rem; }}
+    .metric span {{ color: #d9e2ff; font-size: .82rem; }}
+    section {{ margin-top: 42px; }}
+    h2 {{ margin: 0 0 8px; font-size: 1.6rem; letter-spacing: -.02em; }}
+    .section-copy {{ margin: 0 0 20px; color: var(--muted); }}
+    .calendar-grid {{ display: grid; gap: 16px; }}
+    .calendar-card {{ display: grid; gap: 18px; padding: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 8px 24px rgb(23 34 53 / 5%); }}
+    .eyebrow {{ margin: 0; color: var(--accent); font-size: .8rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }}
+    h3 {{ margin: 2px 0 0; font-size: 1.25rem; }}
+    code {{ display: block; overflow-wrap: anywhere; padding: 12px 14px; color: #26334c; background: #f3f5f8; border-radius: 10px; font-size: .86rem; }}
+    .actions {{ display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }}
+    .button {{ min-height: 42px; padding: 9px 15px; color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 10px; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }}
+    .button:hover {{ border-color: #a9b6ca; background: #f8faff; }}
+    .primary {{ color: #fff; background: var(--accent); border-color: var(--accent); }}
+    .primary:hover {{ background: var(--accent-dark); border-color: var(--accent-dark); }}
+    .text-link {{ padding: 8px 4px; color: var(--accent); font-weight: 700; }}
+    .guide {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }}
+    .guide article {{ padding: 20px; background: var(--tint); border-radius: 16px; }}
+    .guide h3 {{ font-size: 1rem; }}
+    .guide p {{ margin: 8px 0 0; color: var(--muted); font-size: .92rem; }}
+    .notice {{ padding: 20px 22px; background: #fff8e5; border: 1px solid #f0d88e; border-radius: 16px; }}
+    .notice strong {{ display: block; margin-bottom: 4px; }}
+    .notice p {{ margin: 0; color: #685719; }}
+    footer {{ margin-top: 44px; color: var(--muted); font-size: .86rem; text-align: center; }}
+    @media (max-width: 680px) {{ .shell {{ padding-top: 24px; }} .hero {{ padding: 28px 22px; border-radius: 18px; }} .metrics, .guide {{ grid-template-columns: 1fr; }} .calendar-card {{ padding: 20px; }} .actions {{ align-items: stretch; }} .button, .text-link {{ width: 100%; text-align: center; }} }}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="status">公開中</p>
+      <h1>GitHub Calendar</h1>
+      <p class="lead">GitHub Issuesから生成された公開カレンダーです。利用するカレンダーのURLを、普段お使いのアプリへ登録してください。</p>
+      <div class="metrics">
+        <div class="metric"><strong>{len(event_list)}件</strong><span>公開予定</span></div>
+        <div class="metric"><strong><time datetime="{timestamp}">{display_timestamp}</time></strong><span>最終生成</span></div>
+      </div>
+    </header>
+
+    <section aria-labelledby="calendars-title">
+      <h2 id="calendars-title">購読するカレンダー</h2>
+      <p class="section-copy">{group_summary} ファイルを一度だけ取り込むのではなく、URLを指定して購読してください。</p>
+      <div class="calendar-grid">{"".join(cards)}</div>
+      <p class="copy-status" aria-live="polite"></p>
+    </section>
+
+    <section aria-labelledby="guide-title">
+      <h2 id="guide-title">登録方法</h2>
+      <p class="section-copy">アプリによって更新の反映まで時間がかかる場合があります。</p>
+      <div class="guide">
+        <article><h3>Google Calendar</h3><p>「URLから追加」にHTTPS URLを設定します。</p></article>
+        <article><h3>Apple Calendar</h3><p>「カレンダー照会」でURLを設定するか、「カレンダーで購読」を選びます。</p></article>
+        <article><h3>Outlook</h3><p>インターネットカレンダーとしてHTTPS URLを追加します。</p></article>
+      </div>
+    </section>
+
+    <section class="notice" aria-label="公開上の注意">
+      <strong>公開カレンダーです</strong>
+      <p>ここから購読できる予定情報は公開されています。更新間隔は各カレンダーアプリに依存します。</p>
+    </section>
+
+    <footer>Source: {html.escape(repository)}</footer>
+  </main>
+  <script>
+    const status = document.querySelector('.copy-status');
+    document.querySelectorAll('[data-calendar-path]').forEach((card) => {{
+      const url = new URL(card.dataset.calendarPath, window.location.href).href;
+      card.querySelector('.calendar-url').textContent = url;
+      card.querySelector('.download-link').href = url;
+      card.querySelector('.subscribe-link').href = url.replace(/^https?:/, 'webcal:');
+      card.querySelector('.copy-button').addEventListener('click', async () => {{
+        try {{
+          await navigator.clipboard.writeText(url);
+          status.textContent = '購読URLをコピーしました。';
+        }} catch (error) {{
+          status.textContent = 'コピーできませんでした。表示されたURLを選択してコピーしてください。';
+        }}
+      }});
+    }});
+  </script>
+</body>
+</html>
+"""
+
+
 def _retry_after(headers, default: float) -> float:
     value = headers.get("Retry-After") if headers else None
     if not value:
@@ -363,7 +526,13 @@ def _replace_output(staged: Path, output: Path, temporary_root: Path) -> None:
             previous.unlink()
 
 
-def generate(issues: Iterable[dict], repository: str, output: Path) -> None:
+def generate(
+    issues: Iterable[dict],
+    repository: str,
+    output: Path,
+    *,
+    generated_at: datetime | None = None,
+) -> None:
     events, errors = [], []
     for issue in issues:
         labels = {label["name"] if isinstance(label, dict) else str(label) for label in issue.get("labels", [])}
@@ -386,7 +555,14 @@ def generate(issues: Iterable[dict], repository: str, output: Path) -> None:
         artifacts[Path("calendars") / f"{group}.ics"] = render_calendar(
             selected, repository, group
         )
+    artifacts[Path("index.html")] = render_index(
+        events,
+        repository,
+        generated_at or datetime.now(timezone.utc),
+    )
     for relative_path, content in artifacts.items():
+        if relative_path.suffix != ".ics":
+            continue
         _validate_calendar(content, relative_path.as_posix())
 
     output = output.absolute()

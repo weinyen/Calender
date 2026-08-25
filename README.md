@@ -18,6 +18,8 @@ https://<owner>.github.io/<repository>/calendar.ics
 https://<owner>.github.io/<repository>/calendars/development.ics
 ```
 
+PagesのルートURLには、公開予定件数、最終生成日時、全体・グループ別の購読リンクと登録方法を示す案内ページが生成されます。案内ページに予定の件名や詳細は表示しません。
+
 カレンダーアプリではファイルを一度だけインポートせず、URLを指定して**購読**してください。購読先が変更を取得する間隔は各アプリに依存します。
 
 ## 予定を追加する

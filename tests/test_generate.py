@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
-from github_calendar.generate import ApiError, EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar
+from github_calendar.generate import ApiError, EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar, render_index
 
 
 def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, labels=None):
@@ -45,6 +45,68 @@ https://example.com
 
 
 class GenerateTests(unittest.TestCase):
+    def test_render_index_lists_subscriptions_without_event_details(self):
+        events = [
+            issue_to_event(
+                issue(
+                    title="[予定] indexには表示しない予定",
+                    labels=[
+                        {"name": "calendar:event"},
+                        {"name": "group:development"},
+                        {"name": "group:company"},
+                    ],
+                ),
+                "owner/repository",
+            ),
+            issue_to_event(
+                issue(
+                    2,
+                    labels=[
+                        {"name": "calendar:event"},
+                        {"name": "group:development"},
+                    ],
+                ),
+                "owner/repository",
+            ),
+        ]
+
+        index = render_index(
+            events,
+            "owner/repository",
+            datetime(2026, 8, 25, 12, 34, tzinfo=timezone.utc),
+        )
+
+        self.assertIn("2件</strong><span>公開予定", index)
+        self.assertIn("2026-08-25 12:34 UTC", index)
+        self.assertIn("https://owner.github.io/repository/calendar.ics", index)
+        self.assertIn("webcal://owner.github.io/repository/calendar.ics", index)
+        self.assertIn("calendars/company.ics", index)
+        self.assertIn("1件の予定", index)
+        self.assertIn("calendars/development.ics", index)
+        self.assertIn("2件の予定", index)
+        self.assertNotIn("indexには表示しない予定", index)
+
+    def test_render_index_escapes_repository_name(self):
+        index = render_index(
+            [],
+            "owner/repository<script>",
+            datetime(2026, 8, 25, tzinfo=timezone.utc),
+        )
+
+        self.assertNotIn("repository<script>", index)
+        self.assertIn("repository%3Cscript%3E/calendar.ics", index)
+        self.assertIn("owner/repository&lt;script&gt;", index)
+
+    def test_render_index_supports_user_pages_repository(self):
+        index = render_index(
+            [],
+            "owner/owner.github.io",
+            datetime(2026, 8, 25, tzinfo=timezone.utc),
+        )
+
+        self.assertIn("https://owner.github.io/calendar.ics", index)
+        self.assertNotIn("owner.github.io/owner.github.io", index)
+
     def test_parse_and_render_timed_event(self):
         event = issue_to_event(issue(labels=[{"name": "calendar:event"}, {"name": "group:development"}, {"name": "type:meeting"}]), "owner/repo")
         self.assertEqual(event.start.astimezone(timezone.utc).hour, 1)
