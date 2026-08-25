@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ class GenerateEndToEndTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "public"
             summary = Path(directory) / "summary.md"
+            validation_report = Path(directory) / "validation-report.json"
             result = subprocess.run(
                 [
                     sys.executable,
@@ -27,6 +29,8 @@ class GenerateEndToEndTests(unittest.TestCase):
                     str(output),
                     "--summary",
                     str(summary),
+                    "--validation-report",
+                    str(validation_report),
                 ],
                 capture_output=True,
                 check=False,
@@ -69,6 +73,50 @@ class GenerateEndToEndTests(unittest.TestCase):
             self.assertIn("| Private events | 0 |", summary_text)
             self.assertIn("| development | 2 |", summary_text)
             self.assertIn("https://owner.github.io/repository/", summary_text)
+
+            report = json.loads(validation_report.read_text(encoding="utf-8"))
+            self.assertEqual(report["version"], 1)
+            self.assertEqual(report["checked_issue_numbers"], [101, 102, 103])
+            self.assertEqual(report["errors"], [])
+
+    def test_invalid_issue_writes_validation_report_without_publishing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "issues.json"
+            output = root / "public"
+            report = root / "validation-report.json"
+            source.write_text(
+                '[{"number":410,"title":"[予定] invalid","body":"",'
+                '"labels":[{"name":"calendar:event"}],'
+                '"updated_at":"2026-08-25T00:00:00Z"}]',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "github_calendar.generate",
+                    "--repository",
+                    "owner/repository",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--validation-report",
+                    str(report),
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse(output.exists())
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["checked_issue_numbers"], [410])
+            self.assertEqual(payload["errors"][0]["issue_number"], 410)
+            self.assertIn("開始・終了", payload["errors"][0]["message"])
 
 
 if __name__ == "__main__":

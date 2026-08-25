@@ -55,6 +55,28 @@ class ApiError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class IssueProblem:
+    issue_number: int
+    message: str
+
+
+class ValidationError(EventError):
+    """One or more Issues failed calendar validation."""
+
+    def __init__(
+        self, problems: Iterable[IssueProblem], checked_issue_numbers: Iterable[int]
+    ) -> None:
+        self.problems = tuple(problems)
+        self.checked_issue_numbers = tuple(sorted(set(checked_issue_numbers)))
+        super().__init__(
+            "\n".join(
+                f"Issue #{problem.issue_number}: {problem.message}"
+                for problem in self.problems
+            )
+        )
+
+
+@dataclass(frozen=True)
 class Event:
     issue_number: int
     title: str
@@ -504,6 +526,29 @@ def render_summary(result: GenerationResult, repository: str) -> str:
     )
 
 
+def write_validation_report(
+    path: Path,
+    checked_issue_numbers: Iterable[int],
+    problems: Iterable[IssueProblem],
+) -> None:
+    """Write a machine-readable report for the optional feedback step."""
+    payload = {
+        "version": 1,
+        "checked_issue_numbers": sorted(set(checked_issue_numbers)),
+        "errors": [
+            {"issue_number": problem.issue_number, "message": problem.message}
+            for problem in problems
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
 def _retry_after(headers, default: float) -> float:
     value = headers.get("Retry-After") if headers else None
     if not value:
@@ -646,7 +691,9 @@ def generate(
     *,
     generated_at: datetime | None = None,
 ) -> GenerationResult:
-    events, errors = [], []
+    issues = list(issues)
+    events, problems = [], []
+    checked_issue_numbers = [int(issue["number"]) for issue in issues]
     excluded_events = 0
     private_events = 0
     for issue in issues:
@@ -657,12 +704,13 @@ def generate(
         if "calendar:exclude" in labels:
             excluded_events += 1
             continue
+        issue_number = int(issue["number"])
         try:
             events.append(issue_to_event(issue, repository))
         except EventError as exc:
-            errors.append(f"Issue #{issue.get('number')}: {exc}")
-    if errors:
-        raise EventError("\n".join(errors))
+            problems.append(IssueProblem(issue_number, str(exc)))
+    if problems:
+        raise ValidationError(problems, checked_issue_numbers)
 
     generated_at = generated_at or datetime.now(timezone.utc)
     group_names = sorted({group for event in events for group in event.groups})
@@ -718,6 +766,11 @@ def main() -> int:
     parser.add_argument("--input", type=Path, help="JSON issue fixture instead of GitHub API")
     parser.add_argument("--output", type=Path, default=Path("public"))
     parser.add_argument("--summary", type=Path, help="append a GitHub Actions job summary")
+    parser.add_argument(
+        "--validation-report",
+        type=Path,
+        help="write checked Issues and validation errors as JSON",
+    )
     args = parser.parse_args()
     try:
         if args.input:
@@ -726,7 +779,22 @@ def main() -> int:
             issues = fetch_issues(args.repository, args.token)
         else:
             parser.error("--token or --input is required")
-        result = generate(issues, args.repository, args.output)
+        try:
+            result = generate(issues, args.repository, args.output)
+        except ValidationError as exc:
+            if args.validation_report:
+                write_validation_report(
+                    args.validation_report,
+                    exc.checked_issue_numbers,
+                    exc.problems,
+                )
+            raise
+        if args.validation_report:
+            write_validation_report(
+                args.validation_report,
+                (issue["number"] for issue in issues),
+                (),
+            )
         if args.summary:
             with args.summary.open("a", encoding="utf-8", newline="\n") as summary:
                 summary.write(render_summary(result, args.repository))

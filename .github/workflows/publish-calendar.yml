@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: read
-  issues: read
+  issues: write
   pages: write
   id-token: write
 
@@ -39,6 +39,17 @@ jobs:
           --token "$GH_TOKEN"
           --output public
           --summary "$GITHUB_STEP_SUMMARY"
+          --validation-report validation-report.json
+      - name: Update Issue validation feedback
+        if: ${{ always() && hashFiles('validation-report.json') != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m github_calendar.feedback
+          --repository "${{ github.repository }}"
+          --token "$GH_TOKEN"
+          --report validation-report.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
