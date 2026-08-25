@@ -3,6 +3,7 @@ description: 公開カレンダーへ掲載する予定を登録します
 title: "[予定] "
 labels:
   - calendar:event
+  - calendar:schema-v1
 body:
   - type: markdown
     attributes:
@@ -61,4 +62,3 @@ body:
     attributes:
       value: |
         作成後、`group:<英小文字・数字・ハイフン>` ラベルでグループ、`type:<名前>` ラベルで種別を設定できます。
-
