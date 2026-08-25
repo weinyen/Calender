@@ -3,25 +3,39 @@
 from __future__ import annotations
 
 import argparse
+import email.utils
 import json
+import os
 import re
+import shutil
 import sys
+import tempfile
+import time as time_module
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
+from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 FIELD_RE = re.compile(r"^###\s+(.+?)\s*$", re.MULTILINE)
 GROUP_RE = re.compile(r"^group:([a-z0-9][a-z0-9-]*)$")
 EMPTY_VALUES = {"", "_No response_", "なし", "None"}
+RETRYABLE_HTTP_STATUSES = {429, 502, 503, 504}
+DEFAULT_API_TIMEOUT = 15.0
+DEFAULT_API_ATTEMPTS = 3
+DEFAULT_API_BACKOFF = 1.0
 
 
 class EventError(ValueError):
     """An issue could not be converted to an event."""
+
+
+class ApiError(RuntimeError):
+    """GitHub Issues could not be fetched safely."""
 
 
 @dataclass(frozen=True)
@@ -53,6 +67,16 @@ def parse_fields(body: str) -> dict[str, str]:
 def _value(fields: dict[str, str], name: str) -> str:
     value = fields.get(name, "").strip()
     return "" if value in EMPTY_VALUES else value
+
+
+def _normalize_text(value: str) -> str:
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    if any(
+        (ord(char) < 0x20 and char not in {"\n", "\t"}) or ord(char) == 0x7f
+        for char in value
+    ):
+        raise EventError("ICSのテキストに制御文字は使用できません")
+    return value
 
 
 def issue_to_event(issue: dict, repository: str) -> Event:
@@ -90,23 +114,38 @@ def issue_to_event(issue: dict, repository: str) -> Event:
     event_url = _value(fields, "関連URL")
     if event_url:
         parsed_url = urllib.parse.urlparse(event_url)
-        if "\n" in event_url or "\r" in event_url or parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        if (
+            any(ord(char) < 0x20 or ord(char) == 0x7f for char in event_url)
+            or parsed_url.scheme not in {"http", "https"}
+            or not parsed_url.netloc
+        ):
             raise EventError("関連URLは有効な http または https URLにしてください")
     groups = tuple(sorted(match.group(1) for label in labels if (match := GROUP_RE.fullmatch(label))))
     types = sorted(label.split(":", 1)[1] for label in labels if label.startswith("type:") and len(label) > 5)
     categories = tuple(groups + tuple(types))
+    location = _value(fields, "場所")
+    description = _value(fields, "説明")
+    for text_value in (title, location, description, *categories):
+        _normalize_text(text_value)
     updated = issue.get("updated_at") or datetime.now(timezone.utc).isoformat()
     return Event(
         issue_number=int(issue["number"]), title=title, start=start, end=end,
         all_day=all_day, timezone_name=timezone_name,
-        location=_value(fields, "場所"), description=_value(fields, "説明"),
+        location=location, description=description,
         url=event_url, groups=groups, categories=categories,
         updated_at=datetime.fromisoformat(updated.replace("Z", "+00:00")),
     )
 
 
 def escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
+    """Normalize and escape an RFC 5545 TEXT value."""
+    value = _normalize_text(value)
+    return (
+        value.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+    )
 
 
 def fold(line: str, limit: int = 75) -> str:
@@ -163,7 +202,91 @@ def render_calendar(events: Iterable[Event], repository: str, name: str) -> str:
     return "\r\n".join(fold(line) for line in lines) + "\r\n"
 
 
-def fetch_issues(repository: str, token: str) -> list[dict]:
+def _retry_after(headers, default: float) -> float:
+    value = headers.get("Retry-After") if headers else None
+    if not value:
+        return default
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            retry_at = email.utils.parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return default
+
+
+def _rate_limit_detail(headers) -> str:
+    if not headers or headers.get("X-RateLimit-Remaining") != "0":
+        return ""
+    reset = headers.get("X-RateLimit-Reset")
+    if not reset:
+        return " (GitHub API rate limit exhausted)"
+    try:
+        reset_at = datetime.fromtimestamp(int(reset), timezone.utc).isoformat()
+    except (ValueError, OverflowError, OSError):
+        return " (GitHub API rate limit exhausted)"
+    return f" (GitHub API rate limit exhausted; resets at {reset_at})"
+
+
+def _fetch_page(
+    request: urllib.request.Request,
+    repository: str,
+    page: int,
+    *,
+    timeout: float,
+    attempts: int,
+    backoff: float,
+) -> list[dict]:
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                batch = json.load(response)
+            if not isinstance(batch, list):
+                raise ApiError(
+                    f"GitHub API returned an invalid response for {repository} page {page}: expected a list"
+                )
+            return batch
+        except HTTPError as exc:
+            detail = _rate_limit_detail(exc.headers)
+            message = (
+                f"GitHub API request failed for {repository} page {page}: "
+                f"HTTP {exc.code} {exc.reason}{detail}"
+            )
+            if exc.code not in RETRYABLE_HTTP_STATUSES or attempt == attempts:
+                raise ApiError(message) from exc
+            delay = _retry_after(exc.headers, backoff * (2 ** (attempt - 1)))
+        except (TimeoutError, URLError) as exc:
+            message = (
+                f"GitHub API request failed for {repository} page {page}: {exc}"
+            )
+            if attempt == attempts:
+                raise ApiError(message) from exc
+            delay = backoff * (2 ** (attempt - 1))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ApiError(
+                f"GitHub API returned invalid JSON for {repository} page {page}"
+            ) from exc
+        time_module.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def fetch_issues(
+    repository: str,
+    token: str,
+    *,
+    timeout: float = DEFAULT_API_TIMEOUT,
+    attempts: int = DEFAULT_API_ATTEMPTS,
+    backoff: float = DEFAULT_API_BACKOFF,
+) -> list[dict]:
+    if timeout <= 0:
+        raise ValueError("timeout must be greater than zero")
+    if attempts < 1:
+        raise ValueError("attempts must be at least one")
+    if backoff < 0:
+        raise ValueError("backoff must not be negative")
     issues: list[dict] = []
     page = 1
     while True:
@@ -172,12 +295,46 @@ def fetch_issues(repository: str, token: str) -> list[dict]:
             f"https://api.github.com/repos/{repository}/issues?{query}",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
         )
-        with urllib.request.urlopen(request) as response:
-            batch = json.load(response)
+        batch = _fetch_page(
+            request, repository, page,
+            timeout=timeout, attempts=attempts, backoff=backoff,
+        )
         issues.extend(issue for issue in batch if "pull_request" not in issue)
         if len(batch) < 100:
             return issues
         page += 1
+
+
+def _validate_calendar(content: str, filename: str) -> None:
+    """Reject malformed rendered output before it can replace published files."""
+    if not content.endswith("\r\n") or "\n" in content.replace("\r\n", ""):
+        raise EventError(f"{filename}: ICSの改行はCRLFである必要があります")
+    lines = content.removesuffix("\r\n").split("\r\n")
+    if not lines or lines[0] != "BEGIN:VCALENDAR" or lines[-1] != "END:VCALENDAR":
+        raise EventError(f"{filename}: VCALENDARの開始・終了が不正です")
+    if any(len(line.encode("utf-8")) > 75 for line in lines):
+        raise EventError(f"{filename}: ICSの行が75 octetを超えています")
+    if lines.count("BEGIN:VEVENT") != lines.count("END:VEVENT"):
+        raise EventError(f"{filename}: VEVENTの開始・終了が対応していません")
+
+
+def _replace_output(staged: Path, output: Path, temporary_root: Path) -> None:
+    """Replace an output tree, restoring the previous tree if commit fails."""
+    previous = temporary_root / "previous"
+    had_previous = output.exists() or output.is_symlink()
+    if had_previous:
+        os.replace(output, previous)
+    try:
+        os.replace(staged, output)
+    except BaseException:
+        if had_previous:
+            os.replace(previous, output)
+        raise
+    if had_previous:
+        if previous.is_dir() and not previous.is_symlink():
+            shutil.rmtree(previous)
+        else:
+            previous.unlink()
 
 
 def generate(issues: Iterable[dict], repository: str, output: Path) -> None:
@@ -192,15 +349,32 @@ def generate(issues: Iterable[dict], repository: str, output: Path) -> None:
             errors.append(f"Issue #{issue.get('number')}: {exc}")
     if errors:
         raise EventError("\n".join(errors))
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "calendar.ics").write_text(render_calendar(events, repository, "全体カレンダー"), encoding="utf-8", newline="")
-    group_dir = output / "calendars"
-    group_dir.mkdir(exist_ok=True)
-    for old_file in group_dir.glob("*.ics"):
-        old_file.unlink()
+
+    artifacts = {
+        Path("calendar.ics"): render_calendar(
+            events, repository, "全体カレンダー"
+        )
+    }
     for group in sorted({group for event in events for group in event.groups}):
         selected = [event for event in events if group in event.groups]
-        (group_dir / f"{group}.ics").write_text(render_calendar(selected, repository, group), encoding="utf-8", newline="")
+        artifacts[Path("calendars") / f"{group}.ics"] = render_calendar(
+            selected, repository, group
+        )
+    for relative_path, content in artifacts.items():
+        _validate_calendar(content, relative_path.as_posix())
+
+    output = output.absolute()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    prefix = f".{output.name}.tmp-"
+    with tempfile.TemporaryDirectory(prefix=prefix, dir=output.parent) as directory:
+        temporary_root = Path(directory)
+        staged = temporary_root / "next"
+        staged.mkdir()
+        for relative_path, content in artifacts.items():
+            destination = staged / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(content, encoding="utf-8", newline="")
+        _replace_output(staged, output, temporary_root)
 
 
 def main() -> int:
@@ -210,15 +384,15 @@ def main() -> int:
     parser.add_argument("--input", type=Path, help="JSON issue fixture instead of GitHub API")
     parser.add_argument("--output", type=Path, default=Path("public"))
     args = parser.parse_args()
-    if args.input:
-        issues = json.loads(args.input.read_text(encoding="utf-8"))
-    elif args.token:
-        issues = fetch_issues(args.repository, args.token)
-    else:
-        parser.error("--token or --input is required")
     try:
+        if args.input:
+            issues = json.loads(args.input.read_text(encoding="utf-8"))
+        elif args.token:
+            issues = fetch_issues(args.repository, args.token)
+        else:
+            parser.error("--token or --input is required")
         generate(issues, args.repository, args.output)
-    except EventError as exc:
+    except (ApiError, EventError, json.JSONDecodeError) as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
