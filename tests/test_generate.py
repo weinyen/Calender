@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
-from github_calendar.generate import ApiError, EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar, render_index
+from github_calendar.generate import ApiError, EventError, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar, render_index, render_summary
 
 
 def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, labels=None):
@@ -45,6 +45,41 @@ https://example.com
 
 
 class GenerateTests(unittest.TestCase):
+    def test_generation_result_counts_published_and_omitted_events(self):
+        issues = [
+            issue(1, labels=[{"name": "calendar:event"}, {"name": "group:beta"}]),
+            issue(2, labels=[{"name": "calendar:event"}, {"name": "group:alpha"}, {"name": "group:beta"}]),
+            issue(3, labels=[{"name": "calendar:event"}, {"name": "calendar:exclude"}]),
+            issue(4, labels=[{"name": "calendar:event"}, {"name": "calendar:private"}]),
+            issue(5, labels=[{"name": "calendar:event"}, {"name": "calendar:private"}, {"name": "calendar:exclude"}]),
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = generate(
+                issues,
+                "owner/repository",
+                Path(directory),
+                generated_at=datetime(2026, 8, 25, 12, 34, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(result.published_events, 2)
+        self.assertEqual(result.excluded_events, 1)
+        self.assertEqual(result.private_events, 2)
+        self.assertEqual(
+            [(item.name, item.event_count) for item in result.calendars],
+            [("All", 2), ("alpha", 1), ("beta", 2)],
+        )
+
+        summary = render_summary(result, "owner/repository")
+        self.assertIn("| Published events | 2 |", summary)
+        self.assertIn("| Excluded events | 1 |", summary)
+        self.assertIn("| Private events | 2 |", summary)
+        self.assertIn("| Group calendars | 2 |", summary)
+        self.assertIn("| alpha | 1 |", summary)
+        self.assertIn("| beta | 2 |", summary)
+        self.assertIn("2026-08-25 12:34:00 UTC", summary)
+        self.assertIn("https://owner.github.io/repository/", summary)
+
     def test_render_index_lists_subscriptions_without_event_details(self):
         events = [
             issue_to_event(

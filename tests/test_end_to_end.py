@@ -13,6 +13,7 @@ class GenerateEndToEndTests(unittest.TestCase):
     def test_issue_form_json_generates_expected_calendars(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "public"
+            summary = Path(directory) / "summary.md"
             result = subprocess.run(
                 [
                     sys.executable,
@@ -24,6 +25,8 @@ class GenerateEndToEndTests(unittest.TestCase):
                     str(FIXTURES / "issues.json"),
                     "--output",
                     str(output),
+                    "--summary",
+                    str(summary),
                 ],
                 capture_output=True,
                 check=False,
@@ -58,6 +61,14 @@ class GenerateEndToEndTests(unittest.TestCase):
             self.assertIn("calendars/company.ics", index)
             self.assertIn("calendars/development.ics", index)
             self.assertNotIn("Planning meeting", index)
+
+            summary_text = summary.read_text(encoding="utf-8")
+            self.assertIn("## Calendar generation", summary_text)
+            self.assertIn("| Published events | 2 |", summary_text)
+            self.assertIn("| Excluded events | 1 |", summary_text)
+            self.assertIn("| Private events | 0 |", summary_text)
+            self.assertIn("| development | 2 |", summary_text)
+            self.assertIn("https://owner.github.io/repository/", summary_text)
 
 
 if __name__ == "__main__":

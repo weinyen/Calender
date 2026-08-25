@@ -111,7 +111,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 - [x] `webcal://` リンクとHTTPS URLのコピー手段を用意する。
 - workflow失敗をGitHub Issue、メール、または利用チームの通知先へ知らせる仕組みを選択可能にする。
 - 入力エラーのIssueへ検証結果をCheckまたはコメントで返す。ただしbotの更新によるworkflow loopを防止する。
-- 生成件数、除外件数、グループ一覧をjob summaryへ出す。
+- [x] 生成件数、除外件数、グループ一覧をjob summaryへ出す。
 - フォームschemaにversionを持たせ、見出し変更時の後方互換方針と移行ツールを用意する。
 
 **完了条件:** Actionsログを読まなくても、公開状態、購読URL、入力エラーの修正箇所が分かる。

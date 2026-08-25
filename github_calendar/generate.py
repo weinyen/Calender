@@ -55,6 +55,22 @@ class Event:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class CalendarResult:
+    name: str
+    path: str
+    event_count: int
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    generated_at: datetime
+    published_events: int
+    excluded_events: int
+    private_events: int
+    calendars: tuple[CalendarResult, ...]
+
+
 def parse_fields(body: str) -> dict[str, str]:
     """Parse the stable Markdown headings emitted by GitHub Issue Forms."""
     matches = list(FIELD_RE.finditer(body or ""))
@@ -391,6 +407,45 @@ def render_index(
 """
 
 
+def render_summary(result: GenerationResult, repository: str) -> str:
+    """Render generation metadata for a GitHub Actions job summary."""
+    base_url = _pages_base_url(repository)
+    generated_at = result.generated_at.astimezone(timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
+    rows = []
+    for calendar in result.calendars:
+        url = f"{base_url}/{urllib.parse.quote(calendar.path, safe='/')}"
+        rows.append(
+            f"| {calendar.name} | {calendar.event_count} | "
+            f"[`{calendar.path}`]({url}) |"
+        )
+    return "\n".join(
+        [
+            "## Calendar generation",
+            "",
+            "✅ Calendar artifacts were generated successfully.",
+            "",
+            "| Item | Result |",
+            "| --- | ---: |",
+            f"| Published events | {result.published_events} |",
+            f"| Excluded events | {result.excluded_events} |",
+            f"| Private events | {result.private_events} |",
+            f"| Group calendars | {max(0, len(result.calendars) - 1)} |",
+            f"| Generated at | {generated_at} |",
+            "",
+            "### Published calendars",
+            "",
+            "| Calendar | Events | URL |",
+            "| --- | ---: | --- |",
+            *rows,
+            "",
+            f"[Open calendar index]({base_url}/)",
+            "",
+        ]
+    )
+
+
 def _retry_after(headers, default: float) -> float:
     value = headers.get("Retry-After") if headers else None
     if not value:
@@ -532,11 +587,17 @@ def generate(
     output: Path,
     *,
     generated_at: datetime | None = None,
-) -> None:
+) -> GenerationResult:
     events, errors = [], []
+    excluded_events = 0
+    private_events = 0
     for issue in issues:
         labels = {label["name"] if isinstance(label, dict) else str(label) for label in issue.get("labels", [])}
-        if not {"calendar:exclude", "calendar:private"}.isdisjoint(labels):
+        if "calendar:private" in labels:
+            private_events += 1
+            continue
+        if "calendar:exclude" in labels:
+            excluded_events += 1
             continue
         try:
             events.append(issue_to_event(issue, repository))
@@ -545,20 +606,26 @@ def generate(
     if errors:
         raise EventError("\n".join(errors))
 
+    generated_at = generated_at or datetime.now(timezone.utc)
+    group_names = sorted({group for event in events for group in event.groups})
+    calendar_results = [CalendarResult("All", "calendar.ics", len(events))]
     artifacts = {
         Path("calendar.ics"): render_calendar(
             events, repository, "全体カレンダー"
         )
     }
-    for group in sorted({group for event in events for group in event.groups}):
+    for group in group_names:
         selected = [event for event in events if group in event.groups]
+        calendar_results.append(
+            CalendarResult(group, f"calendars/{group}.ics", len(selected))
+        )
         artifacts[Path("calendars") / f"{group}.ics"] = render_calendar(
             selected, repository, group
         )
     artifacts[Path("index.html")] = render_index(
         events,
         repository,
-        generated_at or datetime.now(timezone.utc),
+        generated_at,
     )
     for relative_path, content in artifacts.items():
         if relative_path.suffix != ".ics":
@@ -577,6 +644,13 @@ def generate(
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(content, encoding="utf-8", newline="")
         _replace_output(staged, output, temporary_root)
+    return GenerationResult(
+        generated_at=generated_at,
+        published_events=len(events),
+        excluded_events=excluded_events,
+        private_events=private_events,
+        calendars=tuple(calendar_results),
+    )
 
 
 def main() -> int:
@@ -585,6 +659,7 @@ def main() -> int:
     parser.add_argument("--token", help="GitHub token; unnecessary with --input")
     parser.add_argument("--input", type=Path, help="JSON issue fixture instead of GitHub API")
     parser.add_argument("--output", type=Path, default=Path("public"))
+    parser.add_argument("--summary", type=Path, help="append a GitHub Actions job summary")
     args = parser.parse_args()
     try:
         if args.input:
@@ -593,8 +668,11 @@ def main() -> int:
             issues = fetch_issues(args.repository, args.token)
         else:
             parser.error("--token or --input is required")
-        generate(issues, args.repository, args.output)
-    except (ApiError, EventError, json.JSONDecodeError) as exc:
+        result = generate(issues, args.repository, args.output)
+        if args.summary:
+            with args.summary.open("a", encoding="utf-8", newline="\n") as summary:
+                summary.write(render_summary(result, args.repository))
+    except (ApiError, EventError, json.JSONDecodeError, OSError) as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
