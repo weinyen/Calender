@@ -1,0 +1,36 @@
+[
+  {
+    "number": 101,
+    "title": "[予定] 開発定例会",
+    "body": "### 開始\n\n2026-09-01 10:00\n\n### 終了\n\n2026-09-01 11:00\n\n### タイムゾーン\n\nAsia/Tokyo\n\n### 終日予定\n\n- [ ] 終日予定として登録する\n\n### 場所\n\n第1会議室\n\n### 関連URL\n\nhttps://example.com/meetings/101\n\n### 説明\n\n進捗確認, 質疑\n次の行",
+    "labels": [
+      {"name": "calendar:event"},
+      {"name": "group:development"},
+      {"name": "type:meeting"}
+    ],
+    "updated_at": "2026-08-25T00:00:00Z"
+  },
+  {
+    "number": 102,
+    "title": "[予定] リリース期間",
+    "body": "### 開始\n\n2026-09-10\n\n### 終了\n\n2026-09-12\n\n### タイムゾーン\n\nUTC\n\n### 終日予定\n\n- [x] 終日予定として登録する\n\n### 場所\n\n_No response_\n\n### 関連URL\n\n_No response_\n\n### 説明\n\nリリース対応期間",
+    "labels": [
+      {"name": "calendar:event"},
+      {"name": "group:company"},
+      {"name": "group:development"},
+      {"name": "type:deadline"}
+    ],
+    "updated_at": "2026-08-26T12:34:56Z"
+  },
+  {
+    "number": 103,
+    "title": "[予定] 非公開の準備会",
+    "body": "### 開始\n\n2026-09-02 10:00\n\n### 終了\n\n2026-09-02 11:00\n\n### タイムゾーン\n\nAsia/Tokyo\n\n### 終日予定\n\n- [ ] 終日予定として登録する\n\n### 場所\n\n_No response_\n\n### 関連URL\n\n_No response_\n\n### 説明\n\n公開しない予定",
+    "labels": [
+      {"name": "calendar:event"},
+      {"name": "calendar:exclude"},
+      {"name": "group:development"}
+    ],
+    "updated_at": "2026-08-27T00:00:00Z"
+  }
+]
