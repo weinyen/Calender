@@ -3,7 +3,7 @@ description: 公開カレンダーへ掲載する予定を登録します
 title: "[予定] "
 labels:
   - calendar:event
-  - calendar:schema-v1
+  - calendar:schema-v2
 body:
   - type: markdown
     attributes:
@@ -43,6 +43,18 @@ body:
       label: 終日予定
       options:
         - label: 終日予定として登録する
+  - type: dropdown
+    id: recurrence
+    attributes:
+      label: 繰り返し
+      description: 開始日時を基準に、Issueを閉じるまで繰り返します
+      options:
+        - なし
+        - 毎週（開始と同じ曜日）
+        - 毎月（開始と同じ日）
+      default: 0
+    validations:
+      required: true
   - type: input
     id: location
     attributes:

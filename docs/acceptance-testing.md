@@ -80,6 +80,9 @@ Issue Formから次の2件を作成します。実際の試験日より十分後
 | A08 | 同じIssueをReopenする | 次回取得後に編集後の内容で予定が再表示される |
 | A09 | `calendar:exclude`を付け、その後外す | 付与後は消え、解除後は同じ予定として再表示される |
 | A10 | 購読を削除する | クライアントからカレンダーと予定を削除でき、元IssueやPagesには影響しない |
+| A11 | 繰り返しを「毎週」にした予定を作成する | 開始と同じ曜日・時刻に毎週表示され、単一の系列として扱われる |
+| A12 | 繰り返しを「毎月」にした予定を作成する | 開始と同じ日付・時刻に毎月表示され、該当日がない月はスキップされる |
+| A13 | 繰り返し予定のIssueをCloseし、Reopenする | Close後に系列全体が消え、Reopen後に同じUIDの系列として復元される |
 
 ## 6. クライアント別結果
 
@@ -97,6 +100,9 @@ Issue Formから次の2件を作成します。実際の試験日より十分後
 | A08 | Pending | Pending | Pending | |
 | A09 | Pending | Pending | Pending | |
 | A10 | Pending | Pending | Pending | |
+| A11 | Pending | Pending | Pending | |
+| A12 | Pending | Pending | Pending | |
+| A13 | Pending | Pending | Pending | |
 
 ## 7. 更新時間の記録
 

@@ -93,10 +93,31 @@ class IcsComplianceTests(unittest.TestCase):
                 self.assertRegex(properties["DTSTART;VALUE=DATE"][0], DATE)
                 self.assertRegex(properties["DTEND;VALUE=DATE"][0], DATE)
             else:
-                self.assertEqual(len(properties.get("DTSTART", [])), 1)
-                self.assertEqual(len(properties.get("DTEND", [])), 1)
-                self.assertRegex(properties["DTSTART"][0], UTC_DATE_TIME)
-                self.assertRegex(properties["DTEND"][0], UTC_DATE_TIME)
+                starts = properties.get("DTSTART", [])
+                ends = properties.get("DTEND", [])
+                local_starts = [
+                    value
+                    for name, values in properties.items()
+                    if name.startswith("DTSTART;TZID=")
+                    for value in values
+                ]
+                local_ends = [
+                    value
+                    for name, values in properties.items()
+                    if name.startswith("DTEND;TZID=")
+                    for value in values
+                ]
+                self.assertEqual(len(starts) + len(local_starts), 1)
+                self.assertEqual(len(ends) + len(local_ends), 1)
+                if starts:
+                    self.assertRegex(starts[0], UTC_DATE_TIME)
+                    self.assertRegex(ends[0], UTC_DATE_TIME)
+                else:
+                    self.assertRegex(local_starts[0], r"^\d{8}T\d{6}$")
+                    self.assertRegex(local_ends[0], r"^\d{8}T\d{6}$")
+
+            for rule in properties.get("RRULE", []):
+                self.assertIn(rule, {"FREQ=WEEKLY", "FREQ=MONTHLY"})
 
 
 if __name__ == "__main__":

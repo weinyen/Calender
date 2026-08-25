@@ -42,7 +42,23 @@ SCHEMAS = {
         "location": "場所",
         "url": "関連URL",
         "description": "説明",
-    }
+    },
+    2: {
+        "start": "開始",
+        "end": "終了",
+        "timezone": "タイムゾーン",
+        "all_day": "終日予定",
+        "recurrence": "繰り返し",
+        "location": "場所",
+        "url": "関連URL",
+        "description": "説明",
+    },
+}
+RECURRENCE_RULES = {
+    "": "",
+    "なし": "",
+    "毎週（開始と同じ曜日）": "FREQ=WEEKLY",
+    "毎月（開始と同じ日）": "FREQ=MONTHLY",
 }
 
 
@@ -90,6 +106,23 @@ class Event:
     groups: tuple[str, ...]
     categories: tuple[str, ...]
     updated_at: datetime
+    recurrence_rule: str = ""
+
+
+@dataclass(frozen=True)
+class CalendarResult:
+    name: str
+    path: str
+    event_count: int
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    generated_at: datetime
+    published_events: int
+    excluded_events: int
+    private_events: int
+    calendars: tuple[CalendarResult, ...]
 
 
 @dataclass(frozen=True)
@@ -230,6 +263,17 @@ def issue_to_event(issue: dict, repository: str) -> Event:
     if end <= start:
         raise EventError("終了は開始より後にしてください")
 
+    recurrence_value = (
+        _schema_value(fields, schema_version, "recurrence")
+        if "recurrence" in SCHEMAS[schema_version]
+        else ""
+    )
+    if recurrence_value not in RECURRENCE_RULES:
+        raise EventError(
+            "繰り返しは「なし」「毎週（開始と同じ曜日）」「毎月（開始と同じ日）」から選択してください"
+        )
+    recurrence_rule = RECURRENCE_RULES[recurrence_value]
+
     raw_title = issue.get("title", "").strip()
     title = re.sub(r"^\[予定\]\s*", "", raw_title).strip()
     if not title:
@@ -257,6 +301,7 @@ def issue_to_event(issue: dict, repository: str) -> Event:
         location=location, description=description,
         url=event_url, groups=groups, categories=categories,
         updated_at=datetime.fromisoformat(updated.replace("Z", "+00:00")),
+        recurrence_rule=recurrence_rule,
     )
 
 
@@ -306,11 +351,20 @@ def render_calendar(events: Iterable[Event], repository: str, name: str) -> str:
         lines.append("DTSTAMP:" + event.updated_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
         if event.all_day:
             lines.extend([f"DTSTART;VALUE=DATE:{event.start:%Y%m%d}", f"DTEND;VALUE=DATE:{event.end:%Y%m%d}"])
+        elif event.recurrence_rule:
+            # Recurrence must be anchored to the entered wall time. Emitting UTC
+            # here would move monthly dates near midnight and shift hours at DST.
+            lines.extend([
+                f"DTSTART;TZID={event.timezone_name}:" + event.start.strftime("%Y%m%dT%H%M%S"),
+                f"DTEND;TZID={event.timezone_name}:" + event.end.strftime("%Y%m%dT%H%M%S"),
+            ])
         else:
             lines.extend([
                 "DTSTART:" + event.start.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
                 "DTEND:" + event.end.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
             ])
+        if event.recurrence_rule:
+            lines.append(f"RRULE:{event.recurrence_rule}")
         lines.append(f"SUMMARY:{escape(event.title)}")
         if event.description:
             lines.append(f"DESCRIPTION:{escape(event.description)}")

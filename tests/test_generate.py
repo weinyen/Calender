@@ -10,8 +10,11 @@ from unittest.mock import patch
 from github_calendar.generate import ApiError, EventError, detect_schema_version, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar, render_index, render_summary
 
 
-def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, labels=None):
+def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, recurrence=None, labels=None):
     check = "- [x] 終日予定として登録する" if all_day else "- [ ] 終日予定として登録する"
+    recurrence_block = (
+        f"### 繰り返し\n\n{recurrence}\n\n" if recurrence is not None else ""
+    )
     body = f"""### 開始
 
 {start}
@@ -28,7 +31,7 @@ def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00
 
 {check}
 
-### 場所
+{recurrence_block}### 場所
 
 第1会議室
 
@@ -58,10 +61,11 @@ class GenerateTests(unittest.TestCase):
             ),
             1,
         )
+        self.assertEqual(detect_schema_version("", ["calendar:schema-v2"]), 2)
 
     def test_schema_version_rejects_unsupported_malformed_and_conflicting_values(self):
         cases = [
-            ("<!-- calendar-schema: 2 -->", [], "未対応.*2"),
+            ("<!-- calendar-schema: 3 -->", [], "未対応.*3"),
             ("<!-- calendar-schema: abc -->", [], "markerの形式が不正"),
             ("<!-- calendar-schema: 1 --><!-- calendar-schema: 1 -->", [], "markerが重複"),
             ("", ["calendar:schema-vx"], "ラベルの形式が不正"),
@@ -75,12 +79,69 @@ class GenerateTests(unittest.TestCase):
                     detect_schema_version(body, labels)
 
     def test_generate_reports_issue_number_for_unsupported_schema(self):
-        invalid = issue(410, labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v2"}])
+        invalid = issue(410, labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v3"}])
 
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(
-                EventError, r"Issue #410: 未対応のcalendar schema version.*2"
+                EventError, r"Issue #410: 未対応のcalendar schema version.*3"
             ):
+                generate([invalid], "owner/repository", Path(directory))
+
+    def test_schema_v2_renders_weekly_and_monthly_recurrence(self):
+        weekly = issue_to_event(
+            issue(
+                11,
+                recurrence="毎週（開始と同じ曜日）",
+                labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v2"}],
+            ),
+            "owner/repository",
+        )
+        monthly = issue_to_event(
+            issue(
+                12,
+                start="2026-09-15",
+                end="2026-09-15",
+                all_day=True,
+                recurrence="毎月（開始と同じ日）",
+                labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v2"}],
+            ),
+            "owner/repository",
+        )
+
+        calendar = render_calendar([weekly, monthly], "owner/repository", "全体")
+
+        self.assertEqual(weekly.recurrence_rule, "FREQ=WEEKLY")
+        self.assertEqual(monthly.recurrence_rule, "FREQ=MONTHLY")
+        self.assertIn("DTSTART;TZID=Asia/Tokyo:20260901T100000\r\n", calendar)
+        self.assertIn("DTEND;TZID=Asia/Tokyo:20260901T110000\r\n", calendar)
+        self.assertIn("RRULE:FREQ=WEEKLY\r\n", calendar)
+        self.assertIn("RRULE:FREQ=MONTHLY\r\n", calendar)
+
+    def test_schema_v2_without_recurrence_and_schema_v1_remain_one_time_events(self):
+        schema_v2 = issue_to_event(
+            issue(
+                recurrence="なし",
+                labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v2"}],
+            ),
+            "owner/repository",
+        )
+        schema_v1 = issue_to_event(issue(), "owner/repository")
+
+        self.assertEqual(schema_v2.recurrence_rule, "")
+        self.assertEqual(schema_v1.recurrence_rule, "")
+        self.assertNotIn(
+            "RRULE:", render_calendar([schema_v2, schema_v1], "owner/repository", "全体")
+        )
+
+    def test_schema_v2_rejects_unknown_recurrence(self):
+        invalid = issue(
+            411,
+            recurrence="毎年",
+            labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v2"}],
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(EventError, r"Issue #411: 繰り返しは"):
                 generate([invalid], "owner/repository", Path(directory))
 
     def test_generation_result_counts_published_and_omitted_events(self):
