@@ -1,0 +1,64 @@
+name: カレンダー予定を登録
+description: 公開カレンダーへ掲載する予定を登録します
+title: "[予定] "
+labels:
+  - calendar:event
+body:
+  - type: markdown
+    attributes:
+      value: |
+        入力した内容は公開ICSに掲載されます。機密情報や個人情報は記載しないでください。
+        日時は選択したタイムゾーンの時刻として解釈されます。
+  - type: input
+    id: start
+    attributes:
+      label: 開始
+      description: 時刻ありは YYYY-MM-DD HH:MM、終日予定は YYYY-MM-DD
+      placeholder: "2026-09-01 10:00"
+    validations:
+      required: true
+  - type: input
+    id: end
+    attributes:
+      label: 終了
+      description: 時刻ありは YYYY-MM-DD HH:MM、終日予定は最終日（1日の予定なら開始日と同じ）
+      placeholder: "2026-09-01 11:00"
+    validations:
+      required: true
+  - type: dropdown
+    id: timezone
+    attributes:
+      label: タイムゾーン
+      options:
+        - Asia/Tokyo
+        - UTC
+        - America/New_York
+        - Europe/London
+    validations:
+      required: true
+  - type: checkboxes
+    id: all_day
+    attributes:
+      label: 終日予定
+      options:
+        - label: 終日予定として登録する
+  - type: input
+    id: location
+    attributes:
+      label: 場所
+      placeholder: 第1会議室 / オンライン
+  - type: input
+    id: url
+    attributes:
+      label: 関連URL
+      placeholder: https://example.com/meeting
+  - type: textarea
+    id: description
+    attributes:
+      label: 説明
+      description: 公開カレンダーに掲載する説明
+  - type: markdown
+    attributes:
+      value: |
+        作成後、`group:<英小文字・数字・ハイフン>` ラベルでグループ、`type:<名前>` ラベルで種別を設定できます。
+
