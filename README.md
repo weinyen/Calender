@@ -2,10 +2,12 @@
 
 GitHub Issuesで予定を管理し、購読可能なiCalendar（ICS）をGitHub Pagesへ自動公開します。
 
+現在の実装範囲、未対応事項、今後の優先順位は[現状整理とロードマップ](docs/roadmap.md)を、対応環境と互換性の保証範囲は[サポート範囲](docs/support.md)を参照してください。公開上の前提は[個人用公開カレンダーの脅威モデル](docs/threat-model.md)に、主要カレンダーアプリの確認手順と結果は[受入試験](docs/acceptance-testing.md)に記録します。
+
 ## 初期設定
 
 1. リポジトリの **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選択します。
-2. IssuesのLabelsで、制御ラベル `calendar:event`、`calendar:exclude`、`calendar:private` を作成します。`calendar:event` が存在しないとIssue Formから自動付与されません。
+2. IssuesのLabelsで、制御ラベル `calendar:event`、`calendar:schema-v1`、`calendar:schema-v2`、`calendar:schema-v3`、`calendar:exclude`、`calendar:private` を作成します。ラベルが存在しないとIssue Formから自動付与されません。古いschemaラベルは既存予定との互換性維持に使用します。
 3. 必要なグループラベル（例: `group:development`）と種別ラベル（例: `type:meeting`）を作成します。
 4. Actionsの **Publish calendar** を手動実行します。
 
@@ -15,6 +17,10 @@ GitHub Issuesで予定を管理し、購読可能なiCalendar（ICS）をGitHub 
 https://<owner>.github.io/<repository>/calendar.ics
 https://<owner>.github.io/<repository>/calendars/development.ics
 ```
+
+PagesのルートURLには、公開予定件数、最終生成日時、全体・グループ別の購読リンクと登録方法を示す案内ページが生成されます。案内ページに予定の件名や詳細は表示しません。
+
+案内ページの「webcalで購読」は、`webcal://`に対応するカレンダーアプリを直接開きます。Google Calendarなどへ手動登録する場合は、「URLをコピー」でHTTPS URLをコピーしてください。
 
 カレンダーアプリではファイルを一度だけインポートせず、URLを指定して**購読**してください。購読先が変更を取得する間隔は各アプリに依存します。
 
@@ -26,6 +32,8 @@ https://<owner>.github.io/<repository>/calendars/development.ics
 
 `calendar:event` ラベルが付いたOpen Issueだけが生成対象です。Issueタイトル先頭の `[予定]` はICSの予定名から自動的に除かれます。
 
+新しいIssueには`calendar:schema-v3`が付き、フォームの解釈方法を固定します。従来の`calendar:schema-v1`、`calendar:schema-v2`またはschemaラベルのない予定も、後方互換のため引き続き読み取れます。
+
 ### 日時の入力
 
 | 種類 | 開始・終了の形式 | 例 |
@@ -35,6 +43,18 @@ https://<owner>.github.io/<repository>/calendars/development.ics
 
 終日予定の「終了」には最後に予定を表示する日を入力します。1日だけなら開始日と同じ日を入力します。既定のタイムゾーンは `Asia/Tokyo` です。
 
+### 繰り返し予定
+
+Issue Formの「繰り返し」で次を選択できます。
+
+- **なし:** 1回だけの予定です。
+- **毎週（開始と同じ曜日）:** 開始日時を基準に7日ごとに繰り返します。
+- **毎月（開始と同じ日）:** 開始日時と同じ日付で毎月繰り返します。該当日がない月（例: 31日）はスキップされます。
+
+「繰り返しの終了」では、終了なし、回数指定、終了日指定を選択できます。回数は最初の予定を含む回数です。終了日はその日に開始する予定までを含みます。回数と終了日は同時に指定できません。
+
+IssueをCloseすると系列全体がカレンダーから削除され、Reopenすると復元されます。開始・終了や繰り返し設定を変更すると、同じUIDの系列として更新されます。
+
 ## 変更、削除、非公開
 
 - **変更:** Issue本文を編集すると、同じIssue番号由来のUIDで予定が更新されます。
@@ -43,6 +63,12 @@ https://<owner>.github.io/<repository>/calendars/development.ics
 - **非公開:** `calendar:private` ラベルを付けると公開対象外になります。ただし公開リポジトリのIssue本文を秘密にはできません。
 
 入力が不正な予定がある場合、Actionsは失敗して直前の正常なPagesを維持します。ActionsログにIssue番号と修正理由が表示されます。
+
+入力エラーがあるIssueには、`github-actions[bot]`が修正理由をコメントします。同じIssueのエラーコメントは更新され、入力を修正して検証に成功すると解消済みの表示になります。フィードバックの投稿に失敗しても、正常なカレンダーの公開は妨げません。
+
+成功した **Publish calendar** workflowのSummaryには、公開・除外・非公開の予定件数、グループ別件数、各カレンダーとPages案内ページへのリンクが表示されます。
+
+入力エラー以外のbuild・deploy障害は、`[Calendar] Publish workflow failure`という専用Issueで通知します。同じIssueを更新し、正常な公開が確認できると自動的にCloseします。
 
 ## グルーピング
 
@@ -58,7 +84,7 @@ group:company
 
 ## ローカル実行
 
-Python 3.11以降を使用します。実行時依存パッケージはありません。
+サポート対象のPython 3.11または3.12を使用します。実行時依存パッケージはありません。
 
 ```bash
 python -m github_calendar.generate \
