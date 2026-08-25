@@ -7,7 +7,7 @@ GitHub Issuesで予定を管理し、購読可能なiCalendar（ICS）をGitHub 
 ## 初期設定
 
 1. リポジトリの **Settings → Pages → Build and deployment → Source** で **GitHub Actions** を選択します。
-2. IssuesのLabelsで、制御ラベル `calendar:event`、`calendar:schema-v1`、`calendar:schema-v2`、`calendar:exclude`、`calendar:private` を作成します。ラベルが存在しないとIssue Formから自動付与されません。`schema-v1`は既存予定との互換性維持に使用します。
+2. IssuesのLabelsで、制御ラベル `calendar:event`、`calendar:schema-v1`、`calendar:schema-v2`、`calendar:schema-v3`、`calendar:exclude`、`calendar:private` を作成します。ラベルが存在しないとIssue Formから自動付与されません。古いschemaラベルは既存予定との互換性維持に使用します。
 3. 必要なグループラベル（例: `group:development`）と種別ラベル（例: `type:meeting`）を作成します。
 4. Actionsの **Publish calendar** を手動実行します。
 
@@ -32,7 +32,7 @@ PagesのルートURLには、公開予定件数、最終生成日時、全体・
 
 `calendar:event` ラベルが付いたOpen Issueだけが生成対象です。Issueタイトル先頭の `[予定]` はICSの予定名から自動的に除かれます。
 
-新しいIssueには`calendar:schema-v2`が付き、フォームの解釈方法を固定します。従来の`calendar:schema-v1`またはschemaラベルのない予定も、後方互換のため引き続き読み取れます。
+新しいIssueには`calendar:schema-v3`が付き、フォームの解釈方法を固定します。従来の`calendar:schema-v1`、`calendar:schema-v2`またはschemaラベルのない予定も、後方互換のため引き続き読み取れます。
 
 ### 日時の入力
 
@@ -51,7 +51,9 @@ Issue Formの「繰り返し」で次を選択できます。
 - **毎週（開始と同じ曜日）:** 開始日時を基準に7日ごとに繰り返します。
 - **毎月（開始と同じ日）:** 開始日時と同じ日付で毎月繰り返します。該当日がない月（例: 31日）はスキップされます。
 
-繰り返しには終了日を設けません。IssueをCloseすると系列全体がカレンダーから削除され、Reopenすると復元されます。開始・終了や繰り返し設定を変更すると、同じUIDの系列として更新されます。
+「繰り返しの終了」では、終了なし、回数指定、終了日指定を選択できます。回数は最初の予定を含む回数です。終了日はその日に開始する予定までを含みます。回数と終了日は同時に指定できません。
+
+IssueをCloseすると系列全体がカレンダーから削除され、Reopenすると復元されます。開始・終了や繰り返し設定を変更すると、同じUIDの系列として更新されます。
 
 ## 変更、削除、非公開
 

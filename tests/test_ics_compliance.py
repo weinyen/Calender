@@ -117,7 +117,10 @@ class IcsComplianceTests(unittest.TestCase):
                     self.assertRegex(local_ends[0], r"^\d{8}T\d{6}$")
 
             for rule in properties.get("RRULE", []):
-                self.assertIn(rule, {"FREQ=WEEKLY", "FREQ=MONTHLY"})
+                self.assertRegex(
+                    rule,
+                    r"^FREQ=(?:WEEKLY|MONTHLY)(?:;(?:COUNT=\d+|UNTIL=\d{8}(?:T\d{6}Z)?))?$",
+                )
 
 
 if __name__ == "__main__":

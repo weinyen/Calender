@@ -64,10 +64,10 @@
 
 ## Issue Form schema
 
-- 新しいIssue Formは`calendar:schema-v2`ラベルでschema version 2を宣言し、繰り返し設定を読み取ります。
-- `calendar:schema-v1`またはschemaラベルがない既存Issueは、繰り返しなしのversion 1として読み取ります。
-- JSON fixtureなどでは`<!-- calendar-schema: 1 -->`または`<!-- calendar-schema: 2 -->`を本文へ指定することもできます。ラベルと本文markerが競合する場合や、未対応・不正・重複したversionはIssue番号付きの入力エラーにします。
-- 将来version 3以降を導入する場合もversion 1・2の読み取りを維持し、実際の変更内容に対応する移行方針を別途用意します。
+- 新しいIssue Formは`calendar:schema-v3`ラベルでschema version 3を宣言し、繰り返しと終了条件を読み取ります。
+- `calendar:schema-v1`またはschemaラベルがない既存Issueは繰り返しなし、`calendar:schema-v2`は終了条件なしとして読み取ります。
+- JSON fixtureなどでは`<!-- calendar-schema: 1 -->`から`<!-- calendar-schema: 3 -->`までを本文へ指定できます。ラベルと本文markerが競合する場合や、未対応・不正・重複したversionはIssue番号付きの入力エラーにします。
+- 将来version 4以降を導入する場合もversion 1〜3の読み取りを維持し、実際の変更内容に対応する移行方針を別途用意します。
 
 ## 繰り返し予定
 
@@ -75,11 +75,12 @@
 - 毎週は開始日時を基準とする`RRULE:FREQ=WEEKLY`、毎月は`RRULE:FREQ=MONTHLY`として公開します。
 - 時刻ありの繰り返し予定は、曜日・日付・時刻をDSTの前後でも維持するため、`DTSTART`と`DTEND`へ入力したIANAタイムゾーンの`TZID`を付けます。繰り返しなしの予定は従来どおりUTCで出力します。
 - 毎月の繰り返しで該当日が存在しない月は、RFC 5545の規則に従ってその月をスキップします。
-- 繰り返し終了日は未対応です。IssueがOpenである間は無期限の系列となり、Closeすると系列全体が公開ICSから削除されます。
+- 終了なし、最初の予定を含む回数、最後の予定を許可する日付を選択でき、回数は`COUNT`、日付は`UNTIL`として出力します。
+- 終了条件のない系列はIssueがOpenである間は無期限です。Closeすると、終了条件にかかわらず系列全体が公開ICSから削除されます。
 
 ## 未対応
 
-- 毎日、毎年、隔週、曜日・日付の複数指定、繰り返し終了日
+- 毎日、毎年、隔週、曜日・日付の複数指定
 - リマインダー（`VALARM`）
 - 主催者と参加者（`ORGANIZER`、`ATTENDEE`）
 - `STATUS:CANCELLED`と`SEQUENCE`による明示的な取消・更新通知

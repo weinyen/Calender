@@ -10,10 +10,17 @@ from unittest.mock import patch
 from github_calendar.generate import ApiError, EventError, detect_schema_version, fetch_issues, fold, generate, issue_to_event, parse_fields, render_calendar, render_index, render_summary
 
 
-def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, recurrence=None, labels=None):
+def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00", end="2026-09-01 11:00", timezone_name="Asia/Tokyo", all_day=False, recurrence=None, recurrence_end=None, recurrence_count=None, recurrence_until=None, labels=None):
     check = "- [x] 終日予定として登録する" if all_day else "- [ ] 終日予定として登録する"
     recurrence_block = (
         f"### 繰り返し\n\n{recurrence}\n\n" if recurrence is not None else ""
+    )
+    recurrence_end_block = (
+        f"### 繰り返しの終了\n\n{recurrence_end}\n\n"
+        f"### 繰り返し回数\n\n{recurrence_count or '_No response_'}\n\n"
+        f"### 繰り返し終了日\n\n{recurrence_until or '_No response_'}\n\n"
+        if recurrence_end is not None
+        else ""
     )
     body = f"""### 開始
 
@@ -31,7 +38,7 @@ def issue(number=1, *, title="[予定] 開発定例会", start="2026-09-01 10:00
 
 {check}
 
-{recurrence_block}### 場所
+{recurrence_block}{recurrence_end_block}### 場所
 
 第1会議室
 
@@ -62,10 +69,11 @@ class GenerateTests(unittest.TestCase):
             1,
         )
         self.assertEqual(detect_schema_version("", ["calendar:schema-v2"]), 2)
+        self.assertEqual(detect_schema_version("", ["calendar:schema-v3"]), 3)
 
     def test_schema_version_rejects_unsupported_malformed_and_conflicting_values(self):
         cases = [
-            ("<!-- calendar-schema: 3 -->", [], "未対応.*3"),
+            ("<!-- calendar-schema: 4 -->", [], "未対応.*4"),
             ("<!-- calendar-schema: abc -->", [], "markerの形式が不正"),
             ("<!-- calendar-schema: 1 --><!-- calendar-schema: 1 -->", [], "markerが重複"),
             ("", ["calendar:schema-vx"], "ラベルの形式が不正"),
@@ -79,11 +87,11 @@ class GenerateTests(unittest.TestCase):
                     detect_schema_version(body, labels)
 
     def test_generate_reports_issue_number_for_unsupported_schema(self):
-        invalid = issue(410, labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v3"}])
+        invalid = issue(410, labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v4"}])
 
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(
-                EventError, r"Issue #410: 未対応のcalendar schema version.*3"
+                EventError, r"Issue #410: 未対応のcalendar schema version.*4"
             ):
                 generate([invalid], "owner/repository", Path(directory))
 
@@ -143,6 +151,78 @@ class GenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(EventError, r"Issue #411: 繰り返しは"):
                 generate([invalid], "owner/repository", Path(directory))
+
+    def test_schema_v3_renders_count_and_until_end_conditions(self):
+        counted = issue_to_event(
+            issue(
+                21,
+                recurrence="毎週（開始と同じ曜日）",
+                recurrence_end="回数を指定",
+                recurrence_count="10",
+                labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v3"}],
+            ),
+            "owner/repository",
+        )
+        until_timed = issue_to_event(
+            issue(
+                22,
+                recurrence="毎月（開始と同じ日）",
+                recurrence_end="日付を指定",
+                recurrence_until="2026-12-31",
+                labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v3"}],
+            ),
+            "owner/repository",
+        )
+        until_all_day = issue_to_event(
+            issue(
+                23,
+                start="2026-09-15",
+                end="2026-09-15",
+                all_day=True,
+                recurrence="毎月（開始と同じ日）",
+                recurrence_end="日付を指定",
+                recurrence_until="2026-12-31",
+                labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v3"}],
+            ),
+            "owner/repository",
+        )
+
+        calendar = render_calendar(
+            [counted, until_timed, until_all_day], "owner/repository", "全体"
+        )
+
+        self.assertEqual(counted.recurrence_rule, "FREQ=WEEKLY;COUNT=10")
+        self.assertEqual(
+            until_timed.recurrence_rule, "FREQ=MONTHLY;UNTIL=20261231T145959Z"
+        )
+        self.assertEqual(
+            until_all_day.recurrence_rule, "FREQ=MONTHLY;UNTIL=20261231"
+        )
+        self.assertIn("RRULE:FREQ=WEEKLY;COUNT=10\r\n", calendar)
+        self.assertIn("RRULE:FREQ=MONTHLY;UNTIL=20261231T145959Z\r\n", calendar)
+        self.assertIn("RRULE:FREQ=MONTHLY;UNTIL=20261231\r\n", calendar)
+
+    def test_schema_v3_validates_recurrence_end_conditions(self):
+        cases = [
+            ({"recurrence": "なし", "recurrence_end": "回数を指定", "recurrence_count": "2"}, "繰り返しなし"),
+            ({"recurrence": "毎週（開始と同じ曜日）", "recurrence_end": "回数を指定", "recurrence_count": "0"}, "1以上の整数"),
+            ({"recurrence": "毎週（開始と同じ曜日）", "recurrence_end": "回数を指定", "recurrence_count": "1.5"}, "1以上の整数"),
+            ({"recurrence": "毎週（開始と同じ曜日）", "recurrence_end": "回数を指定", "recurrence_count": "2", "recurrence_until": "2026-12-31"}, "同時に指定"),
+            ({"recurrence": "毎月（開始と同じ日）", "recurrence_end": "日付を指定", "recurrence_until": "invalid"}, "YYYY-MM-DD"),
+            ({"recurrence": "毎月（開始と同じ日）", "recurrence_end": "日付を指定", "recurrence_until": "2026-08-31"}, "開始日以降"),
+            ({"recurrence": "毎週（開始と同じ曜日）", "recurrence_end": "終了なし", "recurrence_count": "2"}, "終了方法"),
+        ]
+
+        for number, (values, expected) in enumerate(cases, 420):
+            with self.subTest(values=values):
+                invalid = issue(
+                    number,
+                    labels=[{"name": "calendar:event"}, {"name": "calendar:schema-v3"}],
+                    **values,
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    with self.assertRaisesRegex(EventError, rf"Issue #{number}:.*{expected}"):
+                        generate([invalid], "owner/repository", Path(directory))
 
     def test_generation_result_counts_published_and_omitted_events(self):
         issues = [

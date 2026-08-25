@@ -53,6 +53,19 @@ SCHEMAS = {
         "url": "関連URL",
         "description": "説明",
     },
+    3: {
+        "start": "開始",
+        "end": "終了",
+        "timezone": "タイムゾーン",
+        "all_day": "終日予定",
+        "recurrence": "繰り返し",
+        "recurrence_end": "繰り返しの終了",
+        "recurrence_count": "繰り返し回数",
+        "recurrence_until": "繰り返し終了日",
+        "location": "場所",
+        "url": "関連URL",
+        "description": "説明",
+    },
 }
 RECURRENCE_RULES = {
     "": "",
@@ -60,6 +73,7 @@ RECURRENCE_RULES = {
     "毎週（開始と同じ曜日）": "FREQ=WEEKLY",
     "毎月（開始と同じ日）": "FREQ=MONTHLY",
 }
+RECURRENCE_END_OPTIONS = {"", "終了なし", "回数を指定", "日付を指定"}
 
 
 class EventError(ValueError):
@@ -107,22 +121,6 @@ class Event:
     categories: tuple[str, ...]
     updated_at: datetime
     recurrence_rule: str = ""
-
-
-@dataclass(frozen=True)
-class CalendarResult:
-    name: str
-    path: str
-    event_count: int
-
-
-@dataclass(frozen=True)
-class GenerationResult:
-    generated_at: datetime
-    published_events: int
-    excluded_events: int
-    private_events: int
-    calendars: tuple[CalendarResult, ...]
 
 
 @dataclass(frozen=True)
@@ -273,6 +271,58 @@ def issue_to_event(issue: dict, repository: str) -> Event:
             "繰り返しは「なし」「毎週（開始と同じ曜日）」「毎月（開始と同じ日）」から選択してください"
         )
     recurrence_rule = RECURRENCE_RULES[recurrence_value]
+    recurrence_end = (
+        _schema_value(fields, schema_version, "recurrence_end")
+        if "recurrence_end" in SCHEMAS[schema_version]
+        else ""
+    )
+    recurrence_count = (
+        _schema_value(fields, schema_version, "recurrence_count")
+        if "recurrence_count" in SCHEMAS[schema_version]
+        else ""
+    )
+    recurrence_until = (
+        _schema_value(fields, schema_version, "recurrence_until")
+        if "recurrence_until" in SCHEMAS[schema_version]
+        else ""
+    )
+    if recurrence_end not in RECURRENCE_END_OPTIONS:
+        raise EventError(
+            "繰り返しの終了は「終了なし」「回数を指定」「日付を指定」から選択してください"
+        )
+    if not recurrence_rule:
+        if recurrence_end not in {"", "終了なし"} or recurrence_count or recurrence_until:
+            raise EventError("繰り返しなしの予定には終了条件を指定できません")
+    elif recurrence_end == "回数を指定":
+        if recurrence_until:
+            raise EventError("繰り返し回数と繰り返し終了日は同時に指定できません")
+        try:
+            count = int(recurrence_count)
+        except ValueError as exc:
+            raise EventError("繰り返し回数は1以上の整数で入力してください") from exc
+        if count < 1 or str(count) != recurrence_count:
+            raise EventError("繰り返し回数は1以上の整数で入力してください")
+        recurrence_rule += f";COUNT={count}"
+    elif recurrence_end == "日付を指定":
+        if recurrence_count:
+            raise EventError("繰り返し回数と繰り返し終了日は同時に指定できません")
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", recurrence_until):
+                raise ValueError
+            until_day = date.fromisoformat(recurrence_until)
+        except ValueError as exc:
+            raise EventError("繰り返し終了日は YYYY-MM-DD 形式で入力してください") from exc
+        start_day = start if isinstance(start, date) and not isinstance(start, datetime) else start.date()
+        if until_day < start_day:
+            raise EventError("繰り返し終了日は開始日以降にしてください")
+        if all_day:
+            until_value = until_day.strftime("%Y%m%d")
+        else:
+            until_local = datetime.combine(until_day, time(23, 59, 59), zone)
+            until_value = until_local.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        recurrence_rule += f";UNTIL={until_value}"
+    elif recurrence_count or recurrence_until:
+        raise EventError("終了条件を指定する場合は繰り返しの終了方法を選択してください")
 
     raw_title = issue.get("title", "").strip()
     title = re.sub(r"^\[予定\]\s*", "", raw_title).strip()

@@ -3,7 +3,7 @@ description: 公開カレンダーへ掲載する予定を登録します
 title: "[予定] "
 labels:
   - calendar:event
-  - calendar:schema-v2
+  - calendar:schema-v3
 body:
   - type: markdown
     attributes:
@@ -47,7 +47,7 @@ body:
     id: recurrence
     attributes:
       label: 繰り返し
-      description: 開始日時を基準に、Issueを閉じるまで繰り返します
+      description: 開始日時を基準に、指定した終了条件まで繰り返します
       options:
         - なし
         - 毎週（開始と同じ曜日）
@@ -55,6 +55,30 @@ body:
       default: 0
     validations:
       required: true
+  - type: dropdown
+    id: recurrence_end
+    attributes:
+      label: 繰り返しの終了
+      description: 「繰り返し」が「なし」の場合は「終了なし」のままにしてください
+      options:
+        - 終了なし
+        - 回数を指定
+        - 日付を指定
+      default: 0
+    validations:
+      required: true
+  - type: input
+    id: recurrence_count
+    attributes:
+      label: 繰り返し回数
+      description: 「回数を指定」を選んだ場合だけ、最初の予定を含む回数を1以上の整数で入力
+      placeholder: "10"
+  - type: input
+    id: recurrence_until
+    attributes:
+      label: 繰り返し終了日
+      description: 「日付を指定」を選んだ場合だけ、最後に繰り返しを許可する日を YYYY-MM-DD で入力
+      placeholder: "2026-12-31"
   - type: input
     id: location
     attributes:

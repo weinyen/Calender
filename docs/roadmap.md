@@ -70,7 +70,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 ### 優先度: 低
 
 10. **繰り返し予定は毎週・毎月に限定**
-    `RRULE`による毎週・毎月には対応しますが、終了日、隔週、毎年などは未対応です。`VALARM`、`ORGANIZER`、`ATTENDEE`も生成しません。
+    `RRULE`による毎週・毎月と回数・終了日指定には対応しますが、隔週、毎年などは未対応です。`VALARM`、`ORGANIZER`、`ATTENDEE`も生成しません。
 11. **検索・編集用UIや双方向同期は対象外**
     操作画面はGitHub Issuesのみで、カレンダー側からGitHubへの更新はできません。
 
@@ -135,6 +135,7 @@ GitHub Issuesを予定の正本（Single Source of Truth）として使い、Iss
 
 - 更新検出に `SEQUENCE`、取消表現に `STATUS:CANCELLED` を使う方式をクライアント互換性試験の結果に基づき検討する。
 - [x] 毎週・毎月の繰り返し予定を`RRULE`で出力し、IssueのCloseで系列全体を削除できるようにする。
+- [x] 繰り返し回数または終了日を指定し、`COUNT`または`UNTIL`として出力できるようにする。
 - リマインダー（`VALARM`）、参加者情報を、それぞれ独立した提案・privacy review・受入試験の後に追加する。
 - 多言語フォーム、複数リポジトリ集約、カレンダーごとの表示名や説明を設定可能にする。
 - 必要性が確認された場合のみ、GitHub App化または管理UIを検討する。
